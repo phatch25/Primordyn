@@ -11,7 +11,7 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "jest",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "lint": "eslint src --ext .ts",
     "clean": "rm -rf dist"
   },
@@ -30,23 +30,26 @@
     "url": "https://github.com/yourusername/primordyn.git"
   },
   "dependencies": {
-    "commander": "latest",
-    "better-sqlite3": "latest",
-    "ignore": "latest",
-    "chalk": "latest",
-    "ora": "latest",
-    "js-tiktoken": "latest",
     "@babel/parser": "latest",
     "@babel/traverse": "latest",
+    "better-sqlite3": "latest",
+    "chalk": "latest",
+    "commander": "latest",
+    "ignore": "latest",
+    "js-tiktoken": "latest",
+    "ora": "latest",
     "typescript": "latest"
   },
   "devDependencies": {
-    "@types/node": "latest",
+    "@babel/preset-env": "^7.28.3",
+    "@babel/preset-typescript": "^7.27.1",
     "@types/better-sqlite3": "latest",
-    "tsx": "latest",
-    "jest": "latest",
     "@types/jest": "latest",
+    "@types/node": "latest",
     "eslint": "latest",
+    "jest": "latest",
+    "ts-jest": "^29.4.1",
+    "tsx": "latest",
     "typescript-eslint": "latest"
   },
   "engines": {

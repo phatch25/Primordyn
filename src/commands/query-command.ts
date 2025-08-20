@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import { ContextRetriever } from '../retriever/index.js';
+import { QueryCommandOptions, QueryCommandResult, FileResult, SymbolResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
 import chalk from 'chalk';
 
 export const queryCommand = new Command('query')
@@ -16,7 +17,7 @@ export const queryCommand = new Command('query')
   .option('--recent <days>', 'Show commits from last N days (default: 7)')
   .option('--blame', 'Show git blame (who last modified each line)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
-  .action(async (searchTerm: string, options) => {
+  .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       const db = new PrimordynDB();
       const retriever = new ContextRetriever(db);
@@ -39,38 +40,38 @@ export const queryCommand = new Command('query')
       });
       
       // Find usages if requested
-      let usages: any[] = [];
+      let usages: FileResult[] = [];
       if (options.includeCallers && symbols.length > 0) {
         usages = await retriever.findUsages(searchTerm, { fileTypes, maxTokens: 2000 });
       }
       
       // Get dependency graph if requested
-      let dependencyGraph = null;
+      let dependencyGraph: DependencyGraph | null = null;
       if (options.showGraph) {
         dependencyGraph = await retriever.getDependencyGraph(searchTerm);
       }
       
       // Get impact analysis if requested
-      let impactAnalysis = null;
+      let impactAnalysis: ImpactAnalysis | null = null;
       if (options.impact) {
         impactAnalysis = await retriever.getImpactAnalysis(searchTerm);
       }
       
       // Get git history if requested
-      let gitHistory = null;
+      let gitHistory: GitHistory | null = null;
       if (options.recent || options.blame) {
         gitHistory = await retriever.getGitHistory(searchTerm);
       }
       
       // Get recent changes if requested
-      let recentChanges = null;
+      let recentChanges: RecentFileChanges[] | null = null;
       if (options.recent) {
         const days = parseInt(options.recent) || 7;
         recentChanges = await retriever.getRecentChanges(days);
       }
       
       // Combine results intelligently
-      const result = {
+      const result: QueryCommandResult = {
         primarySymbol: symbols.length > 0 ? symbols[0] : null,
         allSymbols: symbols,
         files: searchResult.files,
@@ -105,7 +106,7 @@ export const queryCommand = new Command('query')
     }
   });
 
-function outputAIFormat(searchTerm: string, result: any, options: any) {
+function outputAIFormat(searchTerm: string, result: QueryCommandResult, options: QueryCommandOptions) {
   console.log(`# Context for: ${searchTerm}\n`);
   
   // Primary symbol if found
@@ -132,7 +133,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
   // Related symbols
   if (result.allSymbols.length > 1) {
     console.log(`### Related Symbols`);
-    result.allSymbols.slice(1, 6).forEach((sym: any) => {
+    result.allSymbols.slice(1, 6).forEach((sym) => {
       console.log(`- **${sym.name}** (${sym.type}) - ${sym.filePath}:${sym.lineStart}`);
     });
     console.log();
@@ -141,7 +142,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
   // Files that contain or use this
   if (result.files.length > 0) {
     console.log(`### Found in Files`);
-    result.files.slice(0, 5).forEach((file: any) => {
+    result.files.slice(0, 5).forEach((file) => {
       console.log(`- **${file.relativePath}** (${file.tokens} tokens)`);
       
       // Show imports/exports if relevant
@@ -166,11 +167,11 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
       
       // Show symbols in this file
       if (file.symbols && file.symbols.length > 0) {
-        const relevantSymbols = file.symbols.filter((sym: any) =>
+        const relevantSymbols = file.symbols.filter((sym) =>
           sym.name.toLowerCase().includes(searchTerm.toLowerCase())
         );
         if (relevantSymbols.length > 0) {
-          console.log(`  - Contains: ${relevantSymbols.map((s: any) => `${s.name} (${s.type})`).join(', ')}`);
+          console.log(`  - Contains: ${relevantSymbols.map((s) => `${s.name} (${s.type})`).join(', ')}`);
         }
       }
     });
@@ -183,7 +184,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (graph.calls.length > 0) {
       console.log(`### Calls (Outgoing Dependencies)`);
-      graph.calls.forEach((edge: any) => {
+      graph.calls.forEach((edge) => {
         const location = edge.to.filePath !== 'external' 
           ? `${edge.to.filePath}:${edge.to.line}` 
           : 'external';
@@ -195,7 +196,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (graph.calledBy.length > 0) {
       console.log(`### Called By (Incoming Dependencies)`);
-      graph.calledBy.forEach((edge: any) => {
+      graph.calledBy.forEach((edge) => {
         console.log(`- **${edge.from.name}** in ${edge.from.filePath}:${edge.from.line}`);
         console.log(`  Calls at line ${edge.line}`);
       });
@@ -227,7 +228,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (impact.affectedFiles.length > 0) {
       console.log(`#### Most Affected Files`);
-      impact.affectedFiles.slice(0, 10).forEach((file: any) => {
+      impact.affectedFiles.slice(0, 10).forEach((file) => {
         const label = file.isTest ? '(test)' : '';
         console.log(`- **${file.path}** ${label}`);
         console.log(`  ${file.referenceCount} references at lines: ${file.lines.slice(0, 5).join(', ')}${file.lines.length > 5 ? '...' : ''}`);
@@ -265,7 +266,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (history.recentCommits.length > 0) {
       console.log(`#### Recent Commits`);
-      history.recentCommits.slice(0, 5).forEach((commit: any) => {
+      history.recentCommits.slice(0, 5).forEach((commit) => {
         const date = new Date(commit.date).toLocaleDateString();
         console.log(`- **${commit.hash.substring(0, 7)}** - ${commit.message}`);
         console.log(`  ${commit.author} on ${date}`);
@@ -275,7 +276,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (options.blame && history.blame && history.blame.length > 0) {
       console.log(`#### Git Blame`);
-      history.blame.slice(0, 10).forEach((blame: any) => {
+      history.blame.slice(0, 10).forEach((blame) => {
         const date = new Date(blame.commit.date).toLocaleDateString();
         console.log(`- Line ${blame.line}: ${blame.commit.author} (${date})`);
         console.log(`  \`${blame.content.trim()}\``);
@@ -285,7 +286,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     
     if (history.relatedFiles && history.relatedFiles.length > 0) {
       console.log(`#### Files Often Changed Together`);
-      history.relatedFiles.slice(0, 5).forEach((file: any) => {
+      history.relatedFiles.slice(0, 5).forEach((file) => {
         console.log(`- **${file.path}** (${file.coChangeCount} co-changes)`);
       });
       console.log();
@@ -295,7 +296,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
   // Show recent changes across the codebase
   if (result.recentChanges && result.recentChanges.length > 0) {
     console.log(`### 🔄 Recent Changes (last ${options.recent || 7} days)`);
-    result.recentChanges.slice(0, 10).forEach((item: any) => {
+    result.recentChanges.slice(0, 10).forEach((item) => {
       console.log(`- **${item.file}** (${item.commits.length} commits)`);
       if (item.commits[0]) {
         const lastCommit = item.commits[0];
@@ -308,23 +309,26 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
   // Show where it's used (different from graph - this is text search based)
   if (result.usages && result.usages.length > 0) {
     console.log(`### Text References`);
-    result.usages.slice(0, 10).forEach((file: any) => {
+    result.usages.slice(0, 10).forEach((file) => {
       console.log(`- **${file.relativePath}**`);
-      if (file.metadata?.usageLines) {
-        const lines = file.metadata.usageLines.slice(0, 3);
-        console.log(`  Lines: ${lines.join(', ')}${file.metadata.usageLines.length > 3 ? '...' : ''}`);
+      if (file.metadata && typeof file.metadata === 'object' && 'usageLines' in file.metadata) {
+        const usageLines = (file.metadata as any).usageLines;
+        if (Array.isArray(usageLines)) {
+          const lines = usageLines.slice(0, 3);
+          console.log(`  Lines: ${lines.join(', ')}${usageLines.length > 3 ? '...' : ''}`);
+        }
       }
     });
     console.log();
   }
   
   // Test files if requested
-  if (options.includeTests && result.files.some((f: any) => f.relativePath.includes('test'))) {
+  if (options.includeTests && result.files.some((f) => f.relativePath.includes('test'))) {
     console.log(`### Test Files`);
     result.files
-      .filter((f: any) => f.relativePath.includes('test') || f.relativePath.includes('spec'))
+      .filter((f) => f.relativePath.includes('test') || f.relativePath.includes('spec'))
       .slice(0, 3)
-      .forEach((file: any) => {
+      .forEach((file) => {
         console.log(`- **${file.relativePath}**`);
       });
     console.log();
@@ -338,7 +342,7 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
   }
 }
 
-function outputHumanFormat(searchTerm: string, result: any, _options: any) {
+function outputHumanFormat(searchTerm: string, result: QueryCommandResult, _options: QueryCommandOptions) {
   console.log(chalk.blue(`🔍 Context for: "${searchTerm}"`));
   console.log(chalk.gray('━'.repeat(60)));
   
@@ -374,7 +378,7 @@ function outputHumanFormat(searchTerm: string, result: any, _options: any) {
   // Other symbols
   if (result.allSymbols.length > 1) {
     console.log(chalk.green('\n🏷️ Other Matches:'));
-    result.allSymbols.slice(1, 6).forEach((sym: any, index: number) => {
+    result.allSymbols.slice(1, 6).forEach((sym, index: number) => {
       console.log(chalk.blue(`   ${index + 2}. ${sym.name} (${sym.type})`));
       console.log(chalk.gray(`      ${sym.filePath}:${sym.lineStart}`));
     });
@@ -383,7 +387,7 @@ function outputHumanFormat(searchTerm: string, result: any, _options: any) {
   // Files
   if (result.files.length > 0) {
     console.log(chalk.green('\n📁 Found in Files:'));
-    result.files.slice(0, 5).forEach((file: any, index: number) => {
+    result.files.slice(0, 5).forEach((file, index: number) => {
       console.log(chalk.blue(`   ${index + 1}. ${file.relativePath}`));
       console.log(chalk.gray(`      ${file.language || 'unknown'} | ${file.tokens} tokens`));
     });

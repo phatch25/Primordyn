@@ -23,7 +23,7 @@ export interface Symbol {
   lineEnd: number;
   signature?: string;
   documentation?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CallReference {
@@ -41,7 +41,7 @@ export interface ExtractedContext {
   dependencies: string[];
   comments: string[];
   calls: CallReference[];
-  structure: any;
+  structure: Record<string, unknown>;
 }
 
 export interface IndexOptions extends Partial<ScanOptions> {
@@ -88,7 +88,7 @@ export interface FileResult {
   symbols?: SymbolResult[];
   imports?: string[];
   exports?: string[];
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SymbolResult {
@@ -226,4 +226,80 @@ export interface GitHistory {
     path: string;
     coChangeCount: number;
   }[];
+}
+
+// Command line options interfaces
+export interface QueryCommandOptions {
+  tokens: string;
+  format: 'ai' | 'json' | 'human';
+  depth: string;
+  includeTests?: boolean;
+  includeCallers?: boolean;
+  showGraph?: boolean;
+  impact?: boolean;
+  recent?: string;
+  blame?: boolean;
+  languages?: string;
+}
+
+export interface FindCommandOptions {
+  includeContent?: boolean;
+  format: 'ai' | 'json' | 'human';
+  type?: string;
+}
+
+export interface RelatedCommandOptions {
+  includeContent?: boolean;
+  tokens: string;
+  depth: string;
+}
+
+export interface StatsCommandOptions {
+  json?: boolean;
+}
+
+// Recent changes type
+export interface RecentFileChanges {
+  file: string;
+  commits: GitCommit[];
+}
+
+// Query result interface
+export interface QueryCommandResult {
+  primarySymbol: SymbolResult | null;
+  allSymbols: SymbolResult[];
+  files: FileResult[];
+  usages: FileResult[];
+  dependencyGraph: DependencyGraph | null;
+  impactAnalysis: ImpactAnalysis | null;
+  gitHistory: GitHistory | null;
+  recentChanges: RecentFileChanges[] | null;
+  totalTokens: number;
+  truncated: boolean;
+}
+
+// Database row types
+export interface FileRow {
+  id: number;
+  path: string;
+  relative_path: string;
+  content: string;
+  hash: string;
+  size: number;
+  language: string | null;
+  last_modified: string;
+  indexed_at: string;
+  metadata: string | null;
+}
+
+export interface SymbolRow {
+  id: number;
+  file_id: number;
+  name: string;
+  type: string;
+  line_start: number;
+  line_end: number;
+  signature: string | null;
+  documentation: string | null;
+  metadata: string | null;
 }

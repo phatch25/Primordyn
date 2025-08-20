@@ -185,7 +185,7 @@ export class GitAnalyzer {
       const output = this.execGit(`blame -L ${lineStart},${lineEnd} --line-porcelain "${filePath}"`);
       const lines = output.split('\n');
       
-      let currentBlame: Partial<GitBlame> = {};
+      // let currentBlame: Partial<GitBlame> = {};
       let commitHash = '';
       let author = '';
       let authorMail = '';

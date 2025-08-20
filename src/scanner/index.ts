@@ -1,8 +1,8 @@
 import { readdir, stat, readFile } from 'fs/promises';
-import { join, relative, extname } from 'path';
+import { join, relative, extname, basename } from 'path';
 import { createHash } from 'crypto';
 import ignore from 'ignore';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import type { FileInfo, ScanOptions } from '../types/index.js';
 
 export const LANGUAGE_MAP: Record<string, string> = {
@@ -197,7 +197,7 @@ export class FileScanner {
     const gitignorePath = join(this.options.rootPath, '.gitignore');
     if (existsSync(gitignorePath)) {
       try {
-        const gitignoreContent = require('fs').readFileSync(gitignorePath, 'utf-8');
+        const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
         this.ignorer.add(gitignoreContent);
       } catch {
         // Ignore errors reading .gitignore
@@ -207,7 +207,7 @@ export class FileScanner {
     const primordynIgnorePath = join(this.options.rootPath, '.primordynignore');
     if (existsSync(primordynIgnorePath)) {
       try {
-        const ignoreContent = require('fs').readFileSync(primordynIgnorePath, 'utf-8');
+        const ignoreContent = readFileSync(primordynIgnorePath, 'utf-8');
         this.ignorer.add(ignoreContent);
       } catch {
         // Ignore errors reading .primordynignore
@@ -289,26 +289,26 @@ export class FileScanner {
     }
 
     // Check special file names
-    const basename = require('path').basename(filePath).toLowerCase();
-    if (basename === 'dockerfile' || basename.startsWith('dockerfile.')) {
+    const basenameStr = basename(filePath).toLowerCase();
+    if (basenameStr === 'dockerfile' || basenameStr.startsWith('dockerfile.')) {
       return 'dockerfile';
     }
-    if (basename === 'makefile' || basename === 'gnumakefile') {
+    if (basenameStr === 'makefile' || basenameStr === 'gnumakefile') {
       return 'makefile';
     }
-    if (basename === 'rakefile') {
+    if (basenameStr === 'rakefile') {
       return 'ruby';
     }
-    if (basename === 'gemfile') {
+    if (basenameStr === 'gemfile') {
       return 'ruby';
     }
-    if (basename === 'pipfile') {
+    if (basenameStr === 'pipfile') {
       return 'toml';
     }
-    if (basename === 'cargo.toml') {
+    if (basenameStr === 'cargo.toml') {
       return 'toml';
     }
-    if (basename === 'package.json' || basename === 'tsconfig.json') {
+    if (basenameStr === 'package.json' || basenameStr === 'tsconfig.json') {
       return 'json';
     }
 

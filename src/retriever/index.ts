@@ -719,7 +719,7 @@ export class ContextRetriever {
     // Calculate impact metrics
     const affectedFilesList = Array.from(affectedFiles.values());
     const testFiles = affectedFilesList.filter(f => f.isTest);
-    const implementationFiles = affectedFilesList.filter(f => !f.isTest);
+    // const implementationFiles = affectedFilesList.filter(f => !f.isTest);
     
     // Count total references
     const totalReferences = affectedFilesList.reduce((sum, f) => sum + f.referenceCount, 0);

@@ -165,7 +165,7 @@ export class PrimordynDB {
   }
 
   public cleanupExpiredCache(): void {
-    this.db.prepare('DELETE FROM context_cache WHERE expires_at < datetime("now")').run();
+    this.db.prepare("DELETE FROM context_cache WHERE expires_at < datetime('now')").run();
   }
 
   public vacuum(): void {

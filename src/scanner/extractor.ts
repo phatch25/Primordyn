@@ -91,7 +91,7 @@ const LANGUAGE_PATTERNS: Record<string, LanguagePattern> = {
   },
   java: {
     function: [
-      /(?:public|private|protected|static|\s)+[\w<>\[\]]+\s+(\w+)\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{/gm
+      /(?:public|private|protected|static|\s)+[\w<>[\]]+\s+(\w+)\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{/gm
     ],
     class: [
       /(?:public|private|protected|\s)+(?:abstract\s+)?(?:class|interface|enum)\s+(\w+)(?:<[^>]+>)?(?:\s+extends\s+\w+)?(?:\s+implements\s+[\w,\s]+)?/gm
