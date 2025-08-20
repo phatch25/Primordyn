@@ -1,4 +1,4 @@
-import type { FileInfo, Symbol, ExtractedContext } from '../types/index.js';
+import type { FileInfo, Symbol, ExtractedContext, CallReference } from '../types/index.js';
 
 interface LanguagePattern {
   function: RegExp[];
@@ -170,6 +170,7 @@ export class ContextExtractor {
       exports: [],
       dependencies: [],
       comments: [],
+      calls: [],
       structure: {}
     };
 
@@ -229,6 +230,9 @@ export class ContextExtractor {
       });
     }
 
+    // Extract function calls
+    context.calls = this.extractFunctionCalls();
+
     // Build structure outline
     context.structure = this.buildStructure(context.symbols);
 
@@ -264,6 +268,7 @@ export class ContextExtractor {
       exports: [],
       dependencies: [],
       comments: [],
+      calls: [],
       structure: {}
     };
 
@@ -356,6 +361,136 @@ export class ContextExtractor {
     });
 
     return structure;
+  }
+
+  private extractFunctionCalls(): CallReference[] {
+    const calls: CallReference[] = [];
+    const language = this.language || '';
+    
+    // Define patterns for different types of function calls
+    const patterns = {
+      // Function calls: functionName(args)
+      functionCall: /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
+      // Method calls: object.method(args)
+      methodCall: /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
+      // Constructor calls: new ClassName(args)
+      constructorCall: /\bnew\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
+      // Import statements for tracking external dependencies
+      importCall: /(?:import|require)\s*\(?\s*['"`]([^'"`]+)['"`]\s*\)?/g
+    };
+
+    // Extract function calls
+    let match;
+    while ((match = patterns.functionCall.exec(this.content)) !== null) {
+      const functionName = match[1];
+      // Filter out language keywords and common false positives
+      if (!this.isLanguageKeyword(functionName, language)) {
+        const lineNumber = this.getLineNumber(match.index);
+        const column = this.getColumnNumber(match.index);
+        
+        calls.push({
+          calleeName: functionName,
+          callType: 'function',
+          line: lineNumber,
+          column: column,
+          isExternal: false
+        });
+      }
+    }
+    
+    // Extract method calls
+    patterns.methodCall.lastIndex = 0;
+    while ((match = patterns.methodCall.exec(this.content)) !== null) {
+      const objectName = match[1];
+      const methodName = match[2];
+      const lineNumber = this.getLineNumber(match.index);
+      const column = this.getColumnNumber(match.index);
+      
+      calls.push({
+        calleeName: `${objectName}.${methodName}`,
+        callType: 'method',
+        line: lineNumber,
+        column: column,
+        isExternal: false
+      });
+    }
+    
+    // Extract constructor calls
+    patterns.constructorCall.lastIndex = 0;
+    while ((match = patterns.constructorCall.exec(this.content)) !== null) {
+      const className = match[1];
+      const lineNumber = this.getLineNumber(match.index);
+      const column = this.getColumnNumber(match.index);
+      
+      calls.push({
+        calleeName: className,
+        callType: 'constructor',
+        line: lineNumber,
+        column: column,
+        isExternal: false
+      });
+    }
+    
+    // Extract dynamic imports/requires
+    patterns.importCall.lastIndex = 0;
+    while ((match = patterns.importCall.exec(this.content)) !== null) {
+      const moduleName = match[1];
+      const lineNumber = this.getLineNumber(match.index);
+      const column = this.getColumnNumber(match.index);
+      
+      calls.push({
+        calleeName: moduleName,
+        callType: 'import',
+        line: lineNumber,
+        column: column,
+        isExternal: true
+      });
+    }
+    
+    // Deduplicate calls on the same line (keep first occurrence)
+    const uniqueCalls = new Map<string, CallReference>();
+    calls.forEach(call => {
+      const key = `${call.calleeName}:${call.line}:${call.callType}`;
+      if (!uniqueCalls.has(key)) {
+        uniqueCalls.set(key, call);
+      }
+    });
+    
+    return Array.from(uniqueCalls.values());
+  }
+
+  private isLanguageKeyword(word: string, language: string): boolean {
+    const keywords: Record<string, Set<string>> = {
+      typescript: new Set([
+        'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
+        'return', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof',
+        'new', 'this', 'super', 'class', 'extends', 'export', 'import', 'default',
+        'function', 'const', 'let', 'var', 'async', 'await', 'yield', 'delete',
+        'void', 'null', 'undefined', 'true', 'false', 'in', 'of', 'with'
+      ]),
+      javascript: new Set([
+        'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
+        'return', 'throw', 'try', 'catch', 'finally', 'typeof', 'instanceof',
+        'new', 'this', 'super', 'class', 'extends', 'export', 'import', 'default',
+        'function', 'const', 'let', 'var', 'async', 'await', 'yield', 'delete',
+        'void', 'null', 'undefined', 'true', 'false', 'in', 'of', 'with'
+      ]),
+      python: new Set([
+        'if', 'elif', 'else', 'for', 'while', 'break', 'continue', 'return',
+        'def', 'class', 'import', 'from', 'as', 'try', 'except', 'finally',
+        'raise', 'with', 'assert', 'pass', 'yield', 'lambda', 'global', 'nonlocal',
+        'del', 'is', 'and', 'or', 'not', 'in', 'True', 'False', 'None'
+      ])
+    };
+    
+    const langKeywords = keywords[language] || keywords['javascript'];
+    return langKeywords.has(word);
+  }
+
+  private getColumnNumber(index: number): number {
+    const beforeIndex = this.content.substring(0, index);
+    const lastNewline = beforeIndex.lastIndexOf('\n');
+    return index - lastNewline;
   }
 
   private categorizeSymbol(type: Symbol['type']): string {

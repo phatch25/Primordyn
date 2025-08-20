@@ -59,6 +59,23 @@ export class PrimordynDB {
         expires_at TIMESTAMP NOT NULL
       );
 
+      -- Call relationships table for dependency graph
+      CREATE TABLE IF NOT EXISTS call_graph (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        caller_symbol_id INTEGER,
+        caller_file_id INTEGER,
+        callee_name TEXT NOT NULL,
+        callee_symbol_id INTEGER,
+        callee_file_id INTEGER,
+        call_type TEXT NOT NULL, -- 'function', 'method', 'constructor', 'import'
+        line_number INTEGER NOT NULL,
+        column_number INTEGER,
+        FOREIGN KEY (caller_symbol_id) REFERENCES symbols (id) ON DELETE CASCADE,
+        FOREIGN KEY (caller_file_id) REFERENCES files (id) ON DELETE CASCADE,
+        FOREIGN KEY (callee_symbol_id) REFERENCES symbols (id) ON DELETE SET NULL,
+        FOREIGN KEY (callee_file_id) REFERENCES files (id) ON DELETE SET NULL
+      );
+
       -- Create indexes for better performance
       CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
       CREATE INDEX IF NOT EXISTS idx_files_relative_path ON files(relative_path);
@@ -69,6 +86,13 @@ export class PrimordynDB {
       CREATE INDEX IF NOT EXISTS idx_symbols_file_id ON symbols(file_id);
       CREATE INDEX IF NOT EXISTS idx_context_cache_query_hash ON context_cache(query_hash);
       CREATE INDEX IF NOT EXISTS idx_context_cache_expires_at ON context_cache(expires_at);
+      
+      -- Indexes for call graph
+      CREATE INDEX IF NOT EXISTS idx_call_graph_caller_symbol ON call_graph(caller_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_call_graph_callee_symbol ON call_graph(callee_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_call_graph_callee_name ON call_graph(callee_name);
+      CREATE INDEX IF NOT EXISTS idx_call_graph_caller_file ON call_graph(caller_file_id);
+      CREATE INDEX IF NOT EXISTS idx_call_graph_callee_file ON call_graph(callee_file_id);
 
       -- Full-text search indexes
       CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(

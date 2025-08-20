@@ -11,6 +11,7 @@ export const queryCommand = new Command('query')
   .option('--depth <n>', 'Depth of context expansion (default: 1)', '1')
   .option('--include-tests', 'Include related test files')
   .option('--include-callers', 'Include files that use this symbol')
+  .option('--show-graph', 'Show dependency graph (what it calls and what calls it)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .action(async (searchTerm: string, options) => {
     try {
@@ -40,12 +41,19 @@ export const queryCommand = new Command('query')
         usages = await retriever.findUsages(searchTerm, { fileTypes, maxTokens: 2000 });
       }
       
+      // Get dependency graph if requested
+      let dependencyGraph = null;
+      if (options.showGraph) {
+        dependencyGraph = await retriever.getDependencyGraph(searchTerm);
+      }
+      
       // Combine results intelligently
       const result = {
         primarySymbol: symbols.length > 0 ? symbols[0] : null,
         allSymbols: symbols,
         files: searchResult.files,
         usages,
+        dependencyGraph,
         totalTokens: searchResult.totalTokens,
         truncated: searchResult.truncated
       };
@@ -144,9 +152,35 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
     console.log();
   }
   
-  // Show where it's used
+  // Show dependency graph
+  if (result.dependencyGraph) {
+    const graph = result.dependencyGraph;
+    
+    if (graph.calls.length > 0) {
+      console.log(`### Calls (Outgoing Dependencies)`);
+      graph.calls.forEach((edge: any) => {
+        const location = edge.to.filePath !== 'external' 
+          ? `${edge.to.filePath}:${edge.to.line}` 
+          : 'external';
+        console.log(`- **${edge.to.name}** (${edge.callType}) - ${location}`);
+        console.log(`  Called at line ${edge.line}`);
+      });
+      console.log();
+    }
+    
+    if (graph.calledBy.length > 0) {
+      console.log(`### Called By (Incoming Dependencies)`);
+      graph.calledBy.forEach((edge: any) => {
+        console.log(`- **${edge.from.name}** in ${edge.from.filePath}:${edge.from.line}`);
+        console.log(`  Calls at line ${edge.line}`);
+      });
+      console.log();
+    }
+  }
+  
+  // Show where it's used (different from graph - this is text search based)
   if (result.usages && result.usages.length > 0) {
-    console.log(`### Used By`);
+    console.log(`### Text References`);
     result.usages.slice(0, 10).forEach((file: any) => {
       console.log(`- **${file.relativePath}**`);
       if (file.metadata?.usageLines) {

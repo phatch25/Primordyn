@@ -1,6 +1,6 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel } from 'js-tiktoken';
-import type { QueryOptions, QueryResult, FileResult, SymbolResult } from '../types/index.js';
+import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge } from '../types/index.js';
 
 export class ContextRetriever {
   private db: PrimordynDB;
@@ -463,6 +463,145 @@ export class ContextRetriever {
     } catch {
       return Math.ceil(text.length / 4);
     }
+  }
+
+  public async getDependencyGraph(symbolName: string): Promise<DependencyGraph | null> {
+    const database = this.db.getDatabase();
+    
+    // First, find the symbol
+    const symbol = database.prepare(`
+      SELECT 
+        s.id as symbolId,
+        s.name,
+        s.type,
+        s.line_start as line,
+        s.file_id as fileId,
+        f.relative_path as filePath
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE s.name = ?
+      LIMIT 1
+    `).get(symbolName) as any;
+    
+    if (!symbol) {
+      return null;
+    }
+    
+    const root: CallGraphNode = {
+      symbolId: symbol.symbolId,
+      fileId: symbol.fileId,
+      name: symbol.name,
+      type: symbol.type,
+      filePath: symbol.filePath,
+      line: symbol.line
+    };
+    
+    // Get what this symbol calls (outgoing edges)
+    const callsQuery = database.prepare(`
+      SELECT 
+        cg.callee_name as calleeName,
+        cg.call_type as callType,
+        cg.line_number as callLine,
+        cg.callee_symbol_id as calleeSymbolId,
+        cg.callee_file_id as calleeFileId,
+        s2.name as calleeRealName,
+        s2.type as calleeType,
+        s2.line_start as calleeLine,
+        f2.relative_path as calleeFilePath
+      FROM call_graph cg
+      LEFT JOIN symbols s2 ON cg.callee_symbol_id = s2.id
+      LEFT JOIN files f2 ON COALESCE(cg.callee_file_id, s2.file_id) = f2.id
+      WHERE cg.caller_symbol_id = ?
+      ORDER BY cg.line_number
+    `).all(symbol.symbolId) as any[];
+    
+    const calls: CallGraphEdge[] = callsQuery.map(call => ({
+      from: root,
+      to: {
+        symbolId: call.calleeSymbolId,
+        fileId: call.calleeFileId || 0,
+        name: call.calleeRealName || call.calleeName,
+        type: call.calleeType || call.callType,
+        filePath: call.calleeFilePath || 'external',
+        line: call.calleeLine || 0
+      },
+      callType: call.callType,
+      line: call.callLine
+    }));
+    
+    // Get what calls this symbol (incoming edges)
+    const calledByQuery = database.prepare(`
+      SELECT 
+        cg.caller_symbol_id as callerSymbolId,
+        cg.caller_file_id as callerFileId,
+        cg.call_type as callType,
+        cg.line_number as callLine,
+        s1.name as callerName,
+        s1.type as callerType,
+        s1.line_start as callerLine,
+        f1.relative_path as callerFilePath
+      FROM call_graph cg
+      LEFT JOIN symbols s1 ON cg.caller_symbol_id = s1.id
+      LEFT JOIN files f1 ON cg.caller_file_id = f1.id
+      WHERE cg.callee_name = ? OR cg.callee_symbol_id = ?
+      ORDER BY f1.relative_path, cg.line_number
+    `).all(symbolName, symbol.symbolId) as any[];
+    
+    const calledBy: CallGraphEdge[] = calledByQuery.map(caller => ({
+      from: {
+        symbolId: caller.callerSymbolId,
+        fileId: caller.callerFileId,
+        name: caller.callerName || 'anonymous',
+        type: caller.callerType || 'unknown',
+        filePath: caller.callerFilePath || 'unknown',
+        line: caller.callerLine || caller.callLine
+      },
+      to: root,
+      callType: caller.callType,
+      line: caller.callLine
+    }));
+    
+    return {
+      root,
+      calls,
+      calledBy
+    };
+  }
+
+  public async getCallGraph(symbolName: string, depth: number = 1): Promise<Map<string, Set<string>>> {
+    const database = this.db.getDatabase();
+    const graph = new Map<string, Set<string>>();
+    const visited = new Set<string>();
+    
+    const explore = (name: string, currentDepth: number) => {
+      if (currentDepth > depth || visited.has(name)) {
+        return;
+      }
+      visited.add(name);
+      
+      // Get all calls from this symbol
+      const calls = database.prepare(`
+        SELECT DISTINCT cg.callee_name
+        FROM call_graph cg
+        JOIN symbols s ON cg.caller_symbol_id = s.id
+        WHERE s.name = ?
+      `).all(name) as { callee_name: string }[];
+      
+      if (calls.length > 0) {
+        if (!graph.has(name)) {
+          graph.set(name, new Set());
+        }
+        calls.forEach(call => {
+          graph.get(name)!.add(call.callee_name);
+          if (currentDepth < depth) {
+            explore(call.callee_name, currentDepth + 1);
+          }
+        });
+      }
+    };
+    
+    explore(symbolName, 0);
+    return graph;
   }
 
   public async getContextSummary(): Promise<string> {

@@ -165,6 +165,74 @@ export class Indexer {
           stats.symbolsExtracted++;
         }
 
+        // Store call relationships
+        if (context.calls && context.calls.length > 0) {
+          const insertCall = database.prepare(`
+            INSERT INTO call_graph (
+              caller_symbol_id, caller_file_id, callee_name, 
+              callee_symbol_id, callee_file_id, call_type, 
+              line_number, column_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+
+          // For each call, try to find the caller symbol and callee symbol
+          for (const call of context.calls) {
+            // Find which symbol contains this call (the caller)
+            let callerSymbolId: number | null = null;
+            for (const symbol of context.symbols) {
+              if (call.line >= symbol.lineStart && call.line <= symbol.lineEnd) {
+                // Find the symbol's database ID
+                const dbSymbol = database.prepare(
+                  'SELECT id FROM symbols WHERE file_id = ? AND name = ? AND line_start = ?'
+                ).get(fileId, symbol.name, symbol.lineStart) as { id: number } | undefined;
+                if (dbSymbol) {
+                  callerSymbolId = dbSymbol.id;
+                  break;
+                }
+              }
+            }
+
+            // Try to find the callee symbol (might be in a different file)
+            let calleeSymbolId: number | null = null;
+            let calleeFileId: number | null = null;
+            
+            // First check if it's a local symbol in the same file
+            const localCallee = database.prepare(
+              'SELECT id FROM symbols WHERE file_id = ? AND name = ?'
+            ).get(fileId, call.calleeName.split('.').pop()) as { id: number } | undefined;
+            
+            if (localCallee) {
+              calleeSymbolId = localCallee.id;
+              calleeFileId = fileId;
+            } else if (!call.isExternal) {
+              // Try to find it in other files (global search)
+              const globalCallee = database.prepare(`
+                SELECT s.id as symbol_id, s.file_id 
+                FROM symbols s 
+                WHERE s.name = ? 
+                LIMIT 1
+              `).get(call.calleeName.split('.').pop()) as { symbol_id: number; file_id: number } | undefined;
+              
+              if (globalCallee) {
+                calleeSymbolId = globalCallee.symbol_id;
+                calleeFileId = globalCallee.file_id;
+              }
+            }
+
+            // Insert the call relationship
+            insertCall.run(
+              callerSymbolId,
+              fileId,
+              call.calleeName,
+              calleeSymbolId,
+              calleeFileId,
+              call.callType,
+              call.line,
+              call.column || null
+            );
+          }
+        }
+
         // Store imports/exports in metadata
         if (context.imports.length > 0 || context.exports.length > 0) {
           database.prepare(`
@@ -247,6 +315,7 @@ export class Indexer {
 
   public async clearIndex(): Promise<void> {
     const database = this.db.getDatabase();
+    database.prepare('DELETE FROM call_graph').run();
     database.prepare('DELETE FROM symbols').run();
     database.prepare('DELETE FROM files').run();
     database.prepare('DELETE FROM context_cache').run();

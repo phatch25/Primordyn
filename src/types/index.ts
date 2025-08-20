@@ -26,12 +26,21 @@ export interface Symbol {
   metadata?: Record<string, any>;
 }
 
+export interface CallReference {
+  calleeName: string;
+  callType: 'function' | 'method' | 'constructor' | 'import';
+  line: number;
+  column?: number;
+  isExternal?: boolean;
+}
+
 export interface ExtractedContext {
   symbols: Symbol[];
   imports: string[];
   exports: string[];
   dependencies: string[];
   comments: string[];
+  calls: CallReference[];
   structure: any;
 }
 
@@ -98,4 +107,26 @@ export interface DatabaseInfo {
   symbolCount: number;
   totalSize: number;
   lastIndexed: Date | null;
+}
+
+export interface CallGraphNode {
+  symbolId?: number;
+  fileId: number;
+  name: string;
+  type: string;
+  filePath: string;
+  line: number;
+}
+
+export interface CallGraphEdge {
+  from: CallGraphNode;
+  to: CallGraphNode;
+  callType: string;
+  line: number;
+}
+
+export interface DependencyGraph {
+  root: CallGraphNode;
+  calls: CallGraphEdge[];
+  calledBy: CallGraphEdge[];
 }
