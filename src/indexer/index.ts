@@ -1,6 +1,6 @@
 import { PrimordynDB } from '../database/index.js';
 import { FileScanner } from '../scanner/index.js';
-import { ContextExtractor } from '../scanner/extractor.js';
+import { ExtractorManager } from '../extractors/extractor-manager.js';
 import ora from 'ora';
 import chalk from 'chalk';
 import { encodingForModel, Tiktoken } from 'js-tiktoken';
@@ -9,11 +9,13 @@ import type { FileInfo, ScanOptions, IndexOptions, IndexStats } from '../types/i
 export class Indexer {
   private db: PrimordynDB;
   private tokenEncoder: Tiktoken;
+  private extractorManager: ExtractorManager;
 
   constructor(db: PrimordynDB) {
     this.db = db;
     // Use GPT-4 encoder as it's similar to Claude's tokenization
     this.tokenEncoder = encodingForModel('gpt-4');
+    this.extractorManager = new ExtractorManager();
   }
 
   public async index(options: IndexOptions = {}): Promise<IndexStats> {
@@ -98,9 +100,8 @@ export class Indexer {
       const tokens = this.countTokens(fileInfo.content);
       stats.totalTokens += tokens;
 
-      // Extract context
-      const extractor = new ContextExtractor(fileInfo);
-      const context = extractor.extract();
+      // Extract context using the appropriate language extractor
+      const context = await this.extractorManager.extract(fileInfo);
 
       // Begin transaction
       database.prepare('BEGIN').run();

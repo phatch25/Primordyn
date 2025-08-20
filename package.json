@@ -38,11 +38,13 @@
     "ignore": "latest",
     "js-tiktoken": "latest",
     "ora": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "web-tree-sitter": "^0.25.8"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.28.3",
     "@babel/preset-typescript": "^7.27.1",
+    "@types/babel__traverse": "^7.28.0",
     "@types/better-sqlite3": "latest",
     "@types/jest": "latest",
     "@types/node": "latest",
