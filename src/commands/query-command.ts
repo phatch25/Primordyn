@@ -4,46 +4,77 @@ import { ContextRetriever } from '../retriever/index.js';
 import chalk from 'chalk';
 
 export const queryCommand = new Command('query')
-  .description('Search for relevant code context')
-  .argument('<search-term>', 'Term to search for')
-  .option('-t, --max-tokens <tokens>', 'Maximum tokens in response', '4000')
-  .option('-c, --include-content', 'Include full file contents')
-  .option('-s, --include-symbols', 'Include symbol definitions')
-  .option('-i, --include-imports', 'Include import/export information')
-  .option('--file-types <types>', 'Comma-separated list of file types to search')
-  .option('--sort-by <field>', 'Sort by: relevance, path, size, modified', 'relevance')
-  .option('--format <format>', 'Output format: json, markdown, text', 'text')
+  .description('Get relevant code context for AI agents')
+  .argument('<search-term>', 'Search query or file path for related files')
+  .option('--tokens <max>', 'Maximum tokens in response (default: 8000)', '8000')
+  .option('--related <file>', 'Find files related to specified file path')
+  .option('--symbols', 'Include symbol definitions and signatures')
+  .option('--content', 'Include full file contents (uses more tokens)')
+  .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
+  .option('--json', 'Output structured JSON for AI consumption')
   .action(async (searchTerm: string, options) => {
     try {
       const db = new PrimordynDB();
       const retriever = new ContextRetriever(db);
       
-      const fileTypes = options.fileTypes ? options.fileTypes.split(',').map((t: string) => t.trim()) : undefined;
+      const fileTypes = options.languages ? options.languages.split(',').map((t: string) => t.trim()) : undefined;
+      const maxTokens = parseInt(options.tokens);
       
-      const result = await retriever.query(searchTerm, {
-        maxTokens: parseInt(options.maxTokens),
-        includeContent: options.includeContent,
-        includeSymbols: options.includeSymbols,
-        includeImports: options.includeImports,
-        fileTypes,
-        sortBy: options.sortBy
-      });
+      let result;
       
-      if (options.format === 'json') {
+      // Handle related files query
+      if (options.related) {
+        const relatedFiles = await retriever.getRelatedFiles(options.related, {
+          maxTokens,
+          includeContent: options.content,
+          includeSymbols: options.symbols,
+          includeImports: true,
+          fileTypes
+        });
+        
+        result = {
+          files: relatedFiles,
+          symbols: [],
+          totalTokens: relatedFiles.reduce((sum, f) => sum + f.tokens, 0),
+          truncated: false,
+          query_type: 'related',
+          source_file: options.related
+        };
+      } else {
+        // Regular search query
+        result = await retriever.query(searchTerm, {
+          maxTokens,
+          includeContent: options.content,
+          includeSymbols: options.symbols,
+          includeImports: true,
+          fileTypes,
+          sortBy: 'relevance'
+        });
+        result.query_type = 'search';
+      }
+      
+      // JSON output for AI agents
+      if (options.json) {
         console.log(JSON.stringify(result, null, 2));
         db.close();
         return;
       }
       
-      // Text/Markdown output
-      console.log(chalk.blue('🔍 Search Results for:'), chalk.cyan(`"${searchTerm}"`));
+      // Human-readable output
+      const isRelated = options.related;
+      const title = isRelated 
+        ? `🔗 Files related to: ${chalk.cyan(options.related)}`
+        : `🔍 Context for: ${chalk.cyan(`"${searchTerm}"`)}`;
+      
+      console.log(title);
       console.log(chalk.gray('━'.repeat(60)));
       
       if (result.files.length === 0 && result.symbols.length === 0) {
-        console.log(chalk.yellow('No results found. Try:'));
+        console.log(chalk.yellow('No results found.'));
+        console.log('\n' + chalk.blue('💡 Try:'));
         console.log('  • Different search terms');
-        console.log('  • Broader query');
-        console.log('  • Check if files are indexed with:', chalk.cyan('primordyn stats'));
+        console.log('  • Add --content for full file contents');
+        console.log('  • Check indexed files:', chalk.cyan('primordyn stats'));
         db.close();
         return;
       }

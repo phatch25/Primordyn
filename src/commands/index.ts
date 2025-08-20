@@ -1,10 +1,7 @@
 import { Command } from 'commander';
 import { indexCommand } from './index-command.js';
 import { queryCommand } from './query-command.js';
-import { findCommand } from './find-command.js';
-import { relatedCommand } from './related-command.js';
 import { statsCommand } from './stats-command.js';
-import { clearCommand } from './clear-command.js';
 import chalk from 'chalk';
 
 export function createCLI(): Command {
@@ -12,20 +9,17 @@ export function createCLI(): Command {
 
   program
     .name('primordyn')
-    .description('Auto-documentation engine for AI-assisted development')
+    .description('Local context index for AI-assisted development')
     .version('0.1.0')
     .configureHelp({
       sortSubcommands: true,
       subcommandTerm: (cmd) => cmd.name() + ' ' + cmd.usage(),
     });
 
-  // Add commands
+  // Add essential AI-focused commands
   program.addCommand(indexCommand);
   program.addCommand(queryCommand);
-  program.addCommand(findCommand);
-  program.addCommand(relatedCommand);
   program.addCommand(statsCommand);
-  program.addCommand(clearCommand);
 
   // Global error handler
   program.exitOverride((err) => {

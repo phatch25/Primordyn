@@ -64,6 +64,8 @@ export interface QueryResult {
   symbols: SymbolResult[];
   totalTokens: number;
   truncated: boolean;
+  query_type?: 'search' | 'related';
+  source_file?: string;
 }
 
 export interface FileResult {

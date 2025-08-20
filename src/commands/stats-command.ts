@@ -5,8 +5,8 @@ import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
 
 export const statsCommand = new Command('stats')
-  .description('Display indexing statistics and project overview')
-  .option('--format <format>', 'Output format: json, text', 'text')
+  .description('Show index status and project overview')
+  .option('--json', 'Output JSON for AI agents')
   .option('--detailed', 'Show detailed breakdown')
   .action(async (options) => {
     try {
@@ -17,10 +17,15 @@ export const statsCommand = new Command('stats')
       const dbInfo = await db.getDatabaseInfo();
       const indexStats = await indexer.getIndexStats();
       
-      if (options.format === 'json') {
-        console.log(JSON.stringify({ 
-          database: dbInfo, 
-          statistics: indexStats 
+      if (options.json) {
+        console.log(JSON.stringify({
+          status: dbInfo.fileCount > 0 ? 'indexed' : 'empty',
+          files: dbInfo.fileCount,
+          symbols: dbInfo.symbolCount,
+          tokens: indexStats.totalTokens,
+          last_indexed: dbInfo.lastIndexed?.toISOString() || null,
+          languages: indexStats.languages,
+          largest_files: indexStats.largestFiles.slice(0, 5)
         }, null, 2));
         db.close();
         return;
