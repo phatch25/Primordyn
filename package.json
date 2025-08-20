@@ -16,19 +16,28 @@
     "clean": "rm -rf dist"
   },
   "keywords": [
+    "claude-code",
+    "ai-assistant",
+    "code-intelligence",
+    "code-context",
     "documentation",
     "indexing",
-    "ai-assistant",
-    "code-context",
     "static-analysis",
-    "cli"
+    "cli",
+    "llm",
+    "copilot",
+    "context-engineering"
   ],
-  "author": "Your Name",
+  "author": "Parley Hatch",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/primordyn.git"
+    "url": "https://github.com/phatch25/Primordyn.git"
   },
+  "bugs": {
+    "url": "https://github.com/phatch25/Primordyn/issues"
+  },
+  "homepage": "https://github.com/phatch25/Primordyn#readme",
   "dependencies": {
     "@babel/parser": "latest",
     "@babel/traverse": "latest",

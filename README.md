@@ -2,6 +2,12 @@
 
 **Smart context retrieval for AI-assisted development**
 
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange)](https://github.com/phatch25/Primordyn)
+[![Status](https://img.shields.io/badge/status-alpha-yellow)](https://github.com/phatch25/Primordyn)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+> ⚠️ **Alpha Release**: This is an early developmental version (v0.1.0). While functional and tested, APIs may change and bugs may exist. Please [report issues](https://github.com/phatch25/Primordyn/issues) and contribute improvements!
+
 Primordyn indexes your codebase and provides intelligent context retrieval optimized for AI agents like Claude, ChatGPT, and Copilot. It understands code relationships and delivers exactly what AI needs: implementations, dependencies, usage locations, and related files.
 
 > 💡 **Perfect for Claude Code**: Primordyn is specifically designed to enhance [Claude Code workflows](https://docs.anthropic.com/en/docs/claude-code/common-workflows). Jump to [Claude Code Integration](#claude-code-integration) to see how it supercharges your AI pair programming sessions.
