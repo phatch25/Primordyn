@@ -1,0 +1,69 @@
+{
+  "name": "primordyn",
+  "version": "0.1.0",
+  "description": "Auto-documentation engine for AI-assisted development - indexes codebases and serves intelligent context",
+  "main": "dist/index.js",
+  "bin": {
+    "primordyn": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "claude-code",
+    "ai-assistant",
+    "code-intelligence",
+    "code-context",
+    "documentation",
+    "indexing",
+    "static-analysis",
+    "cli",
+    "llm",
+    "copilot",
+    "context-engineering"
+  ],
+  "author": "Parley Hatch",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phatch25/Primordyn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/phatch25/Primordyn/issues"
+  },
+  "homepage": "https://github.com/phatch25/Primordyn#readme",
+  "dependencies": {
+    "@babel/parser": "latest",
+    "@babel/traverse": "latest",
+    "better-sqlite3": "latest",
+    "chalk": "latest",
+    "commander": "latest",
+    "ignore": "latest",
+    "js-tiktoken": "latest",
+    "ora": "latest",
+    "typescript": "latest",
+    "web-tree-sitter": "^0.25.8"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.28.3",
+    "@babel/preset-typescript": "^7.27.1",
+    "@types/babel__traverse": "^7.28.0",
+    "@types/better-sqlite3": "latest",
+    "@types/jest": "latest",
+    "@types/node": "latest",
+    "eslint": "latest",
+    "jest": "latest",
+    "ts-jest": "^29.4.1",
+    "tsx": "latest",
+    "typescript-eslint": "latest"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
