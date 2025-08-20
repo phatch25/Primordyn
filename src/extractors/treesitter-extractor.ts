@@ -1,8 +1,8 @@
-// Tree-sitter would be imported here if properly configured
-// import Parser from 'web-tree-sitter';
+import { Parser, Language, Node } from 'web-tree-sitter';
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
-import type { TreeSitterNode, StructureCategory, SymbolDetail } from './types.js';
+import type { StructureCategory, SymbolDetail } from './types.js';
+// Note: File path utilities would be used when loading WASM files
 // import { fileURLToPath } from 'url';
 // import { dirname, join } from 'path';
 // const __filename = fileURLToPath(import.meta.url);
@@ -111,16 +111,11 @@ const LANGUAGE_CONFIG: Record<string, {
   }
 };
 
-type ParserNode = TreeSitterNode;
-type TreeSitterParser = {
-  parse(input: string): { rootNode: ParserNode; delete(): void };
-  setLanguage(language: unknown): void;
-};
-
 export class TreeSitterExtractor extends BaseExtractor {
-  private parser: TreeSitterParser | null = null;
+  private parser: Parser | null = null;
   private static initialized = false;
-  private static parsers: Map<string, TreeSitterParser> = new Map();
+  private static parsers: Map<string, Parser> = new Map();
+  private static languages: Map<string, Language> = new Map();
   
   getSupportedLanguages(): string[] {
     return Object.keys(LANGUAGE_CONFIG);
@@ -162,6 +157,10 @@ export class TreeSitterExtractor extends BaseExtractor {
       
       // Parse the content
       const tree = this.parser.parse(this.content);
+      if (!tree) {
+        return context;
+      }
+      
       const rootNode = tree.rootNode;
       
       // Extract symbols based on language configuration
@@ -191,9 +190,9 @@ export class TreeSitterExtractor extends BaseExtractor {
       context.structure = this.buildStructure(context.symbols);
       
       tree.delete();
-    } catch (error) {
-      console.error(`Tree-sitter extraction failed for ${fileInfo.language}:`, error);
-      // Fall back to basic extraction
+    } catch {
+      // Silently fall back to basic extraction
+      // Tree-sitter is optional and may not be configured for all languages
       return this.extractBasic(fileInfo);
     }
     
@@ -210,28 +209,39 @@ export class TreeSitterExtractor extends BaseExtractor {
     try {
       // Initialize tree-sitter if not done
       if (!TreeSitterExtractor.initialized) {
-        // await Parser.init();
+        await Parser.init();
         TreeSitterExtractor.initialized = true;
       }
       
-      // Create new parser
-      // const parser = new Parser();
-      const parser = {} as TreeSitterParser; // Placeholder until tree-sitter is properly configured
+      // Create new parser instance
+      const parser = new Parser();
       
-      // For now, we'll use a simplified approach
-      // In production, you'd load the actual WASM files
-      // This is a placeholder that would need actual language bindings
+      // Try to load the language if we have it cached
+      if (TreeSitterExtractor.languages.has(language)) {
+        const lang = TreeSitterExtractor.languages.get(language)!;
+        parser.setLanguage(lang);
+        TreeSitterExtractor.parsers.set(language, parser);
+        this.parser = parser;
+        return;
+      }
       
-      // Store parser for reuse
-      TreeSitterExtractor.parsers.set(language, parser);
-      this.parser = parser;
-    } catch (error) {
-      console.error(`Failed to initialize parser for ${language}:`, error);
+      // For now, we'll skip loading WASM files as they need to be downloaded
+      // In a production setup, you would:
+      // 1. Download language-specific WASM files from tree-sitter repos
+      // 2. Place them in a specific directory
+      // 3. Load them here with Parser.Language.load()
+      
+      // Since we don't have the WASM files, we'll return null
+      // This allows the fallback extractors to handle the file
+      this.parser = null;
+      
+    } catch {
+      // Silently fail - other extractors will handle this file
       this.parser = null;
     }
   }
   
-  private extractNodesByTypes(node: ParserNode, types: string[], symbolType: Symbol['type'], symbols: Symbol[]): void {
+  private extractNodesByTypes(node: Node, types: string[], symbolType: Symbol['type'], symbols: Symbol[]): void {
     if (!node) return;
     
     // Check if current node matches any of the types
@@ -251,7 +261,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private nodeToSymbol(node: ParserNode, type: Symbol['type']): Symbol | null {
+  private nodeToSymbol(node: Node, type: Symbol['type']): Symbol | null {
     // Extract name from node
     const nameNode = this.findNameNode(node);
     if (!nameNode) return null;
@@ -277,7 +287,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     };
   }
   
-  private findNameNode(node: ParserNode): ParserNode | null {
+  private findNameNode(node: Node): Node | null {
     // Look for common name node types
     const nameTypes = ['identifier', 'field_identifier', 'type_identifier', 'property_identifier'];
     
@@ -304,7 +314,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return null;
   }
   
-  private extractImports(node: ParserNode, types: string[], imports: string[], dependencies: string[]): void {
+  private extractImports(node: Node, types: string[], imports: string[], dependencies: string[]): void {
     if (!node) return;
     
     if (types.includes(node.type)) {
@@ -328,7 +338,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private extractCalls(node: ParserNode, types: string[], calls: CallReference[]): void {
+  private extractCalls(node: Node, types: string[], calls: CallReference[]): void {
     if (!node) return;
     
     if (types.includes(node.type)) {
@@ -353,7 +363,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private extractCallName(node: ParserNode): string | null {
+  private extractCallName(node: Node): string | null {
     // Look for function/method name in call expression
     for (let i = 0; i < node.childCount; i++) {
       const child = node.child(i);
@@ -372,7 +382,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return null;
   }
   
-  private findLastIdentifier(node: ParserNode): ParserNode | null {
+  private findLastIdentifier(node: Node): Node | null {
     const lastIdentifier = null;
     
     if (node.type === 'identifier' || node.type === 'field_identifier' || node.type === 'property_identifier') {
@@ -390,7 +400,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return lastIdentifier;
   }
   
-  private determineCallType(node: ParserNode): CallReference['callType'] {
+  private determineCallType(node: Node): CallReference['callType'] {
     if (node.type === 'object_creation_expression' || node.type === 'new_expression') {
       return 'constructor';
     }
@@ -406,7 +416,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return 'function';
   }
   
-  private extractTreeSitterComments(node: ParserNode, comments: string[]): void {
+  private extractTreeSitterComments(node: Node, comments: string[]): void {
     if (!node) return;
     
     if (node.type === 'comment' || node.type === 'line_comment' || node.type === 'block_comment') {

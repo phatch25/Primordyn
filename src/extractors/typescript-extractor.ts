@@ -1,5 +1,9 @@
 import * as parser from '@babel/parser';
-import traverse from '@babel/traverse';
+import _traverse from '@babel/traverse';
+import type { NodePath } from '@babel/traverse';
+// Handle ESM/CJS compatibility for @babel/traverse
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const traverse = (_traverse as any)?.default || _traverse;
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
 import type { 
@@ -64,50 +68,56 @@ export class TypeScriptExtractor extends BaseExtractor {
       
       // Traverse AST
       traverse(ast, {
-        FunctionDeclaration: (path) => {
+        FunctionDeclaration: (path: NodePath) => {
           this.extractFunction(path.node as unknown as BabelNode, context.symbols);
         },
-        FunctionExpression: (path) => {
+        FunctionExpression: (path: NodePath) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
             this.extractFunction(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
-        ArrowFunctionExpression: (path) => {
+        ArrowFunctionExpression: (path: NodePath) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
             this.extractArrowFunction(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
-        ClassDeclaration: (path) => {
+        ClassDeclaration: (path: NodePath) => {
           this.extractClass(path.node as unknown as BabelNode, context.symbols);
         },
-        ClassExpression: (path) => {
+        ClassExpression: (path: NodePath) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
             this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
-        TSInterfaceDeclaration: (path) => {
+        TSInterfaceDeclaration: (path: NodePath) => {
           this.extractInterface(path.node as unknown as BabelTSNode, context.symbols);
         },
-        TSTypeAliasDeclaration: (path) => {
+        TSTypeAliasDeclaration: (path: NodePath) => {
           this.extractTypeAlias(path.node as unknown as BabelTSNode, context.symbols);
         },
-        TSEnumDeclaration: (path) => {
+        TSEnumDeclaration: (path: NodePath) => {
           this.extractEnum(path.node as unknown as BabelTSNode, context.symbols);
         },
-        ImportDeclaration: (path) => {
-          const source = path.node.source.value;
-          context.imports.push(source);
-          context.dependencies.push(source);
+        ImportDeclaration: (path: NodePath) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node = path.node as any;
+          const source = node.source?.value;
+          if (source) {
+            context.imports.push(source);
+            context.dependencies.push(source);
+          }
         },
-        ExportNamedDeclaration: (path) => {
-          if (path.node.declaration) {
-            const decl = path.node.declaration;
+        ExportNamedDeclaration: (path: NodePath) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node = path.node as any;
+          if (node.declaration) {
+            const decl = node.declaration;
             if ('id' in decl && decl.id && 'name' in decl.id) {
               context.exports.push(decl.id.name);
             }
           }
-          if (path.node.specifiers) {
-            (path.node.specifiers as unknown as BabelExportSpecifier[]).forEach((spec: BabelExportSpecifier) => {
+          if (node.specifiers) {
+            (node.specifiers as unknown as BabelExportSpecifier[]).forEach((spec: BabelExportSpecifier) => {
               if (spec.exported && 'name' in spec.exported) {
                 context.exports.push(spec.exported.name);
               }
@@ -117,10 +127,10 @@ export class TypeScriptExtractor extends BaseExtractor {
         ExportDefaultDeclaration: () => {
           context.exports.push('default');
         },
-        CallExpression: (path) => {
+        CallExpression: (path: NodePath) => {
           this.extractCall(path.node as unknown as BabelNode, context.calls);
         },
-        NewExpression: (path) => {
+        NewExpression: (path: NodePath) => {
           this.extractNewExpression(path.node as unknown as BabelNode, context.calls);
         }
       });
@@ -323,6 +333,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       signature: `enum ${name}`,
       metadata: {
         members,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const: (node as any).const || false
       }
     });

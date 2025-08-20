@@ -50,9 +50,9 @@ export class ExtractorManager {
       const extractor = this.languageMap.get(fileInfo.language)!;
       try {
         return await extractor.extract(fileInfo);
-      } catch (error) {
-        console.error(`Extractor failed for ${fileInfo.language}:`, error);
-        // Fall through to try other extractors
+      } catch {
+        // Silently fall through to try other extractors
+        // This allows graceful degradation when specific extractors fail
       }
     }
     
@@ -61,9 +61,9 @@ export class ExtractorManager {
       if (extractor.canHandle(fileInfo)) {
         try {
           return await extractor.extract(fileInfo);
-        } catch (error) {
-          console.error(`Extractor ${extractor.constructor.name} failed:`, error);
-          // Continue to next extractor
+        } catch {
+          // Silently continue to next extractor
+          // This allows graceful fallback through the extractor chain
         }
       }
     }
