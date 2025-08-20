@@ -32,7 +32,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/phatch25/Primordyn.git"
+    "url": "git+https://github.com/phatch25/Primordyn.git"
   },
   "bugs": {
     "url": "https://github.com/phatch25/Primordyn/issues"
