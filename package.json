@@ -1,0 +1,55 @@
+{
+  "name": "primordyn",
+  "version": "0.1.0",
+  "description": "Auto-documentation engine for AI-assisted development - indexes codebases and serves intelligent context",
+  "main": "dist/index.js",
+  "bin": {
+    "primordyn": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "documentation",
+    "indexing",
+    "ai-assistant",
+    "code-context",
+    "static-analysis",
+    "cli"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/primordyn.git"
+  },
+  "dependencies": {
+    "commander": "latest",
+    "better-sqlite3": "latest",
+    "ignore": "latest",
+    "chalk": "latest",
+    "ora": "latest",
+    "js-tiktoken": "latest",
+    "@babel/parser": "latest",
+    "@babel/traverse": "latest",
+    "typescript": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/better-sqlite3": "latest",
+    "tsx": "latest",
+    "jest": "latest",
+    "@types/jest": "latest",
+    "eslint": "latest",
+    "typescript-eslint": "latest"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
