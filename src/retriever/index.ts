@@ -671,12 +671,14 @@ export class ContextRetriever {
     // Get all references to this symbol
     const directReferences = database.prepare(`
       SELECT 
-        cg.caller_file_id as fileId,
-        cg.line_number as line,
-        f.relative_path as filePath,
-        f.language,
+        cg.caller_symbol_id as callerSymbolId,
+        cg.caller_file_id as callerFileId,
+        s.name as callerName,
+        s.type as callerType,
+        f.relative_path as callerFilePath,
+        s.line_start as callerLine,
         cg.call_type as callType,
-        s.name as callerSymbol
+        cg.line_number as callLine
       FROM call_graph cg
       JOIN files f ON cg.caller_file_id = f.id
       LEFT JOIN symbols s ON cg.caller_symbol_id = s.id
