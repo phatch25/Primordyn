@@ -13,6 +13,8 @@ export const queryCommand = new Command('query')
   .option('--include-callers', 'Include files that use this symbol')
   .option('--show-graph', 'Show dependency graph (what it calls and what calls it)')
   .option('--impact', 'Show impact analysis (what breaks if you change this)')
+  .option('--recent <days>', 'Show commits from last N days (default: 7)')
+  .option('--blame', 'Show git blame (who last modified each line)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .action(async (searchTerm: string, options) => {
     try {
@@ -54,6 +56,19 @@ export const queryCommand = new Command('query')
         impactAnalysis = await retriever.getImpactAnalysis(searchTerm);
       }
       
+      // Get git history if requested
+      let gitHistory = null;
+      if (options.recent || options.blame) {
+        gitHistory = await retriever.getGitHistory(searchTerm);
+      }
+      
+      // Get recent changes if requested
+      let recentChanges = null;
+      if (options.recent) {
+        const days = parseInt(options.recent) || 7;
+        recentChanges = await retriever.getRecentChanges(days);
+      }
+      
       // Combine results intelligently
       const result = {
         primarySymbol: symbols.length > 0 ? symbols[0] : null,
@@ -62,6 +77,8 @@ export const queryCommand = new Command('query')
         usages,
         dependencyGraph,
         impactAnalysis,
+        gitHistory,
+        recentChanges,
         totalTokens: searchResult.totalTokens,
         truncated: searchResult.truncated
       };
@@ -225,6 +242,67 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
       });
       console.log();
     }
+  }
+  
+  // Show git history
+  if (result.gitHistory) {
+    const history = result.gitHistory;
+    
+    console.log(`### 📜 Git History`);
+    console.log(`**Last modified:** ${history.lastModified.toLocaleDateString()}`);
+    console.log(`**First seen:** ${history.firstSeen.toLocaleDateString()}`);
+    console.log(`**Total commits:** ${history.totalCommits}`);
+    console.log(`**Unique authors:** ${history.uniqueAuthors.length}`);
+    console.log();
+    
+    if (history.changeFrequency) {
+      console.log(`#### Change Frequency`);
+      console.log(`- Last 7 days: ${history.changeFrequency.last7Days} commits`);
+      console.log(`- Last 30 days: ${history.changeFrequency.last30Days} commits`);
+      console.log(`- Last 90 days: ${history.changeFrequency.last90Days} commits`);
+      console.log();
+    }
+    
+    if (history.recentCommits.length > 0) {
+      console.log(`#### Recent Commits`);
+      history.recentCommits.slice(0, 5).forEach((commit: any) => {
+        const date = new Date(commit.date).toLocaleDateString();
+        console.log(`- **${commit.hash.substring(0, 7)}** - ${commit.message}`);
+        console.log(`  ${commit.author} on ${date}`);
+      });
+      console.log();
+    }
+    
+    if (options.blame && history.blame && history.blame.length > 0) {
+      console.log(`#### Git Blame`);
+      history.blame.slice(0, 10).forEach((blame: any) => {
+        const date = new Date(blame.commit.date).toLocaleDateString();
+        console.log(`- Line ${blame.line}: ${blame.commit.author} (${date})`);
+        console.log(`  \`${blame.content.trim()}\``);
+      });
+      console.log();
+    }
+    
+    if (history.relatedFiles && history.relatedFiles.length > 0) {
+      console.log(`#### Files Often Changed Together`);
+      history.relatedFiles.slice(0, 5).forEach((file: any) => {
+        console.log(`- **${file.path}** (${file.coChangeCount} co-changes)`);
+      });
+      console.log();
+    }
+  }
+  
+  // Show recent changes across the codebase
+  if (result.recentChanges && result.recentChanges.length > 0) {
+    console.log(`### 🔄 Recent Changes (last ${options.recent || 7} days)`);
+    result.recentChanges.slice(0, 10).forEach((item: any) => {
+      console.log(`- **${item.file}** (${item.commits.length} commits)`);
+      if (item.commits[0]) {
+        const lastCommit = item.commits[0];
+        console.log(`  Last: "${lastCommit.message}" by ${lastCommit.author}`);
+      }
+    });
+    console.log();
   }
   
   // Show where it's used (different from graph - this is text search based)

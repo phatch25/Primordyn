@@ -1,15 +1,18 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel } from 'js-tiktoken';
-import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis } from '../types/index.js';
+import { GitAnalyzer } from '../git/analyzer.js';
+import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis, GitHistory } from '../types/index.js';
 
 export class ContextRetriever {
   private db: PrimordynDB;
   private tokenEncoder: any;
+  private gitAnalyzer: GitAnalyzer;
 
   constructor(db: PrimordynDB) {
     this.db = db;
     // Use GPT-4 encoder as it's similar to Claude's tokenization
     this.tokenEncoder = encodingForModel('gpt-4');
+    this.gitAnalyzer = new GitAnalyzer();
   }
 
   public async query(searchTerm: string, options: QueryOptions = {}): Promise<QueryResult> {
@@ -919,6 +922,49 @@ export class ContextRetriever {
       
       suggestions: ['Consider indexing this symbol for better analysis']
     };
+  }
+
+  public async getGitHistory(symbolName: string): Promise<GitHistory | null> {
+    const database = this.db.getDatabase();
+    
+    // Find the symbol to get its file and location
+    const symbol = database.prepare(`
+      SELECT 
+        s.name,
+        s.line_start as lineStart,
+        s.line_end as lineEnd,
+        f.relative_path as filePath
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE s.name = ?
+      LIMIT 1
+    `).get(symbolName) as any;
+    
+    if (!symbol) {
+      // Try to find the file that contains this text
+      const fileResult = database.prepare(`
+        SELECT relative_path as filePath
+        FROM files
+        WHERE content LIKE '%' || ? || '%'
+        LIMIT 1
+      `).get(symbolName) as any;
+      
+      if (fileResult) {
+        return this.gitAnalyzer.getGitHistory(fileResult.filePath, symbolName);
+      }
+      return null;
+    }
+    
+    return this.gitAnalyzer.getGitHistory(
+      symbol.filePath,
+      symbol.name,
+      symbol.lineStart,
+      symbol.lineEnd
+    );
+  }
+  
+  public async getRecentChanges(days: number = 7): Promise<{ file: string; commits: any[] }[]> {
+    return this.gitAnalyzer.getRecentChanges(days);
   }
 
   public async getContextSummary(): Promise<string> {

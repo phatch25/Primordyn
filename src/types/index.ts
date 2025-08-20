@@ -168,3 +168,62 @@ export interface ImpactAnalysis {
   // Suggestions
   suggestions: string[];
 }
+
+export interface GitCommit {
+  hash: string;
+  author: string;
+  email: string;
+  date: Date;
+  message: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface GitFileChange {
+  commit: GitCommit;
+  filePath: string;
+  changeType: 'added' | 'modified' | 'deleted' | 'renamed';
+  insertions: number;
+  deletions: number;
+  oldPath?: string; // For renames
+}
+
+export interface GitBlame {
+  line: number;
+  commit: GitCommit;
+  content: string;
+}
+
+export interface GitHistory {
+  symbol: string;
+  filePath: string;
+  
+  // Recent commits affecting this symbol/file
+  recentCommits: GitCommit[];
+  
+  // File-level changes
+  fileChanges: GitFileChange[];
+  
+  // Line-by-line blame for symbol location
+  blame: GitBlame[];
+  
+  // Statistics
+  totalCommits: number;
+  uniqueAuthors: string[];
+  lastModified: Date;
+  firstSeen: Date;
+  
+  // Change frequency analysis
+  changeFrequency: {
+    last7Days: number;
+    last30Days: number;
+    last90Days: number;
+  };
+  
+  // Related changes (files often changed together)
+  relatedFiles: {
+    path: string;
+    coChangeCount: number;
+  }[];
+}
