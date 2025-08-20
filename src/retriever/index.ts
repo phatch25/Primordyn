@@ -32,13 +32,37 @@ export class ContextRetriever {
       truncated: false
     };
 
-    // Use FTS for better search
-    const fileQuery = this.buildFileQuery(searchTerm, options);
-    const files = database.prepare(fileQuery).all({ searchTerm }) as FileQueryRow[];
+    // Check if we can use FTS5 or need to fall back to LIKE
+    const escapedTerm = this.escapeFTS5(searchTerm);
+    const useFTS = escapedTerm.length > 0 && escapedTerm !== '';
+    
+    let files: FileQueryRow[];
+    let symbols: SymbolQueryRow[];
+    
+    if (useFTS) {
+      // Use FTS for better search
+      const fileQuery = this.buildFileQuery(escapedTerm, options);
+      files = database.prepare(fileQuery).all({ searchTerm: escapedTerm }) as FileQueryRow[];
 
-    // Search in symbols using FTS
-    const symbolQuery = this.buildSymbolQuery(searchTerm, options);
-    const symbols = database.prepare(symbolQuery).all({ searchTerm }) as SymbolQueryRow[];
+      // Search in symbols using FTS
+      const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
+      symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
+    } else {
+      // Fall back to LIKE queries for special characters
+      const fileQuery = this.buildFileLikeQuery(searchTerm, options);
+      const params = [`%${searchTerm}%`];
+      if (options.fileTypes?.length) {
+        params.push(...options.fileTypes);
+      }
+      files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
+      
+      const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
+      const symbolParams = [`%${searchTerm}%`, `%${searchTerm}%`];
+      if (options.fileTypes?.length) {
+        symbolParams.push(...options.fileTypes);
+      }
+      symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
+    }
 
     // Process results with token limit
     for (const file of files) {
@@ -216,35 +240,71 @@ export class ContextRetriever {
   public async findSymbol(symbolName: string, options: QueryOptions = {}): Promise<SymbolResult[]> {
     const database = this.db.getDatabase();
 
-    // Use FTS for symbol search
-    const query = `
-      SELECT 
-        s.id,
-        s.name,
-        s.type,
-        s.line_start as lineStart,
-        s.line_end as lineEnd,
-        s.signature,
-        f.relative_path as filePath,
-        f.content as fileContent
-      FROM symbols_fts fts
-      JOIN symbols s ON fts.rowid = s.id
-      JOIN files f ON s.file_id = f.id
-      WHERE symbols_fts MATCH ?
-      ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
-      ORDER BY 
-        bm25(symbols_fts),
-        CASE WHEN s.name = ? THEN 0 ELSE 1 END,
-        LENGTH(s.name)
-      LIMIT 20
-    `;
+    // Check if we can use FTS5 or need to fall back to LIKE
+    const escapedName = this.escapeFTS5(symbolName);
+    const useFTS = escapedName.length > 0 && escapedName !== '';
+    
+    let symbols: SymbolQueryRow[];
+    
+    if (useFTS) {
+      // Use FTS for symbol search
+      const query = `
+        SELECT 
+          s.id,
+          s.name,
+          s.type,
+          s.line_start as lineStart,
+          s.line_end as lineEnd,
+          s.signature,
+          f.relative_path as filePath,
+          f.content as fileContent
+        FROM symbols_fts fts
+        JOIN symbols s ON fts.rowid = s.id
+        JOIN files f ON s.file_id = f.id
+        WHERE symbols_fts MATCH ?
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
+        ORDER BY 
+          bm25(symbols_fts),
+          CASE WHEN s.name = ? THEN 0 ELSE 1 END,
+          LENGTH(s.name)
+        LIMIT 20
+      `;
 
-    const params = [symbolName, symbolName];
-    if (options.fileTypes?.length) {
-      params.push(...options.fileTypes);
+      const params = [escapedName, escapedName];
+      if (options.fileTypes?.length) {
+        params.push(...options.fileTypes);
+      }
+
+      symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
+    } else {
+      // Fall back to LIKE query for special characters
+      const query = `
+        SELECT 
+          s.id,
+          s.name,
+          s.type,
+          s.line_start as lineStart,
+          s.line_end as lineEnd,
+          s.signature,
+          f.relative_path as filePath,
+          f.content as fileContent
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE s.name LIKE ?
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
+        ORDER BY 
+          CASE WHEN s.name = ? THEN 0 ELSE 1 END,
+          LENGTH(s.name)
+        LIMIT 20
+      `;
+
+      const params = [`%${symbolName}%`, symbolName];
+      if (options.fileTypes?.length) {
+        params.push(...options.fileTypes);
+      }
+
+      symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
     }
-
-    const symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
 
     return symbols.map(symbol => this.processSymbolResult(symbol));
   }
@@ -260,50 +320,100 @@ export class ContextRetriever {
       truncated: false
     };
 
-    // Search files using FTS
-    const fileQuery = `
-      SELECT 
-        f.id, 
-        f.path, 
-        f.relative_path as relativePath, 
-        f.content, 
-        f.language, 
-        f.metadata,
-        f.size,
-        f.last_modified as lastModified,
-        snippet(files_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
-      FROM files_fts fts
-      JOIN files f ON fts.rowid = f.id
-      WHERE files_fts MATCH ?
-      ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
-      ORDER BY bm25(files_fts)
-      LIMIT 10
-    `;
+    // Check if we can use FTS5 or need to fall back to LIKE
+    const escapedQuery = this.escapeFTS5(query);
+    const useFTS = escapedQuery.length > 0 && escapedQuery !== '';
+    
+    let files: FileQueryRow[];
+    let symbols: SymbolQueryRow[];
+    
+    if (useFTS) {
+      // Search files using FTS
+      const fileQuery = `
+        SELECT 
+          f.id, 
+          f.path, 
+          f.relative_path as relativePath, 
+          f.content, 
+          f.language, 
+          f.metadata,
+          f.size,
+          f.last_modified as lastModified,
+          snippet(files_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
+        FROM files_fts fts
+        JOIN files f ON fts.rowid = f.id
+        WHERE files_fts MATCH ?
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
+        ORDER BY bm25(files_fts)
+        LIMIT 10
+      `;
 
-    const files = database.prepare(fileQuery).all(query) as FileQueryRow[];
+      files = database.prepare(fileQuery).all(escapedQuery) as FileQueryRow[];
 
-    // Search symbols using FTS
-    const symbolQuery = `
-      SELECT 
-        s.id,
-        s.name,
-        s.type,
-        s.line_start as lineStart,
-        s.line_end as lineEnd,
-        s.signature,
-        f.relative_path as filePath,
-        f.content as fileContent,
-        snippet(symbols_fts, 0, '<mark>', '</mark>', '...', 16) as snippet
-      FROM symbols_fts fts
-      JOIN symbols s ON fts.rowid = s.id
-      JOIN files f ON s.file_id = f.id
-      WHERE symbols_fts MATCH ?
-      ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
-      ORDER BY bm25(symbols_fts)
-      LIMIT 20
-    `;
+      // Search symbols using FTS
+      const symbolQuery = `
+        SELECT 
+          s.id,
+          s.name,
+          s.type,
+          s.line_start as lineStart,
+          s.line_end as lineEnd,
+          s.signature,
+          f.relative_path as filePath,
+          f.content as fileContent,
+          snippet(symbols_fts, 0, '<mark>', '</mark>', '...', 16) as snippet
+        FROM symbols_fts fts
+        JOIN symbols s ON fts.rowid = s.id
+        JOIN files f ON s.file_id = f.id
+        WHERE symbols_fts MATCH ?
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
+        ORDER BY bm25(symbols_fts)
+        LIMIT 20
+      `;
 
-    const symbols = database.prepare(symbolQuery).all(query) as SymbolQueryRow[];
+      symbols = database.prepare(symbolQuery).all(escapedQuery) as SymbolQueryRow[];
+    } else {
+      // Fall back to LIKE queries for special characters
+      const fileQuery = `
+        SELECT 
+          f.id, 
+          f.path, 
+          f.relative_path as relativePath, 
+          f.content, 
+          f.language, 
+          f.metadata,
+          f.size,
+          f.last_modified as lastModified
+        FROM files f
+        WHERE f.content LIKE ?
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
+        ORDER BY f.relative_path
+        LIMIT 10
+      `;
+
+      files = database.prepare(fileQuery).all(`%${query}%`) as FileQueryRow[];
+
+      // Search symbols using LIKE
+      const symbolQuery = `
+        SELECT 
+          s.id,
+          s.name,
+          s.type,
+          s.line_start as lineStart,
+          s.line_end as lineEnd,
+          s.signature,
+          f.relative_path as filePath,
+          f.content as fileContent
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE (s.name LIKE ? OR s.signature LIKE ?)
+        ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
+        ORDER BY LENGTH(s.name)
+        LIMIT 20
+      `;
+
+      symbols = database.prepare(symbolQuery).all(`%${query}%`, `%${query}%`) as SymbolQueryRow[];
+    }
 
     // Process results
     for (const file of files) {
@@ -335,7 +445,7 @@ export class ContextRetriever {
     return result;
   }
 
-  private buildFileQuery(searchTerm: string, options: QueryOptions): string {
+  private buildFileQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
         f.id, 
@@ -373,7 +483,7 @@ export class ContextRetriever {
     return query;
   }
 
-  private buildSymbolQuery(searchTerm: string, options: QueryOptions): string {
+  private buildSymbolQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
         s.id,
@@ -1088,12 +1198,21 @@ export class ContextRetriever {
   }
   
   private escapeFTS5(term: string): string {
-    // FTS5 doesn't handle special characters well
-    // Return cleaned version for checking if we should use FTS
-    return term.replace(/[^a-zA-Z0-9\s_-]/g, '');
+    // FTS5 special characters that need escaping or removal
+    // If the term contains only special characters, return empty to trigger LIKE fallback
+    const cleaned = term.replace(/[^a-zA-Z0-9\s_-]/g, '');
+    
+    // If nothing remains after cleaning, we can't use FTS5
+    if (cleaned.trim().length === 0) {
+      return '';
+    }
+    
+    // For FTS5, we need to wrap terms with special chars in quotes
+    // But since we're removing them, just return the cleaned version
+    return cleaned.trim();
   }
   
-  private buildFileLikeQuery(searchTerm: string, options: QueryOptions): string {
+  private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
         f.id, f.path, f.relative_path, f.content, 
@@ -1110,7 +1229,7 @@ export class ContextRetriever {
     return query;
   }
   
-  private buildSymbolLikeQuery(searchTerm: string, options: QueryOptions): string {
+  private buildSymbolLikeQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
         s.*, f.relative_path as filePath, f.language
