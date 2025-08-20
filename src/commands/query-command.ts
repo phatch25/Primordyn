@@ -12,6 +12,7 @@ export const queryCommand = new Command('query')
   .option('--include-tests', 'Include related test files')
   .option('--include-callers', 'Include files that use this symbol')
   .option('--show-graph', 'Show dependency graph (what it calls and what calls it)')
+  .option('--impact', 'Show impact analysis (what breaks if you change this)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .action(async (searchTerm: string, options) => {
     try {
@@ -47,6 +48,12 @@ export const queryCommand = new Command('query')
         dependencyGraph = await retriever.getDependencyGraph(searchTerm);
       }
       
+      // Get impact analysis if requested
+      let impactAnalysis = null;
+      if (options.impact) {
+        impactAnalysis = await retriever.getImpactAnalysis(searchTerm);
+      }
+      
       // Combine results intelligently
       const result = {
         primarySymbol: symbols.length > 0 ? symbols[0] : null,
@@ -54,6 +61,7 @@ export const queryCommand = new Command('query')
         files: searchResult.files,
         usages,
         dependencyGraph,
+        impactAnalysis,
         totalTokens: searchResult.totalTokens,
         truncated: searchResult.truncated
       };
@@ -173,6 +181,47 @@ function outputAIFormat(searchTerm: string, result: any, options: any) {
       graph.calledBy.forEach((edge: any) => {
         console.log(`- **${edge.from.name}** in ${edge.from.filePath}:${edge.from.line}`);
         console.log(`  Calls at line ${edge.line}`);
+      });
+      console.log();
+    }
+  }
+  
+  // Show impact analysis
+  if (result.impactAnalysis) {
+    const impact = result.impactAnalysis;
+    
+    console.log(`### 🎯 Impact Analysis`);
+    console.log(`**Risk Level: ${impact.riskLevel}**\n`);
+    
+    console.log(`#### Impact Summary`);
+    console.log(`- **Direct references:** ${impact.directReferences}`);
+    console.log(`- **Files affected:** ${impact.filesAffected}`);
+    console.log(`- **Symbols affected:** ${impact.symbolsAffected}`);
+    console.log(`- **Tests affected:** ${impact.testsAffected}`);
+    console.log();
+    
+    if (impact.riskFactors.length > 0) {
+      console.log(`#### Risk Factors`);
+      impact.riskFactors.forEach((factor: string) => {
+        console.log(`- ${factor}`);
+      });
+      console.log();
+    }
+    
+    if (impact.affectedFiles.length > 0) {
+      console.log(`#### Most Affected Files`);
+      impact.affectedFiles.slice(0, 10).forEach((file: any) => {
+        const label = file.isTest ? '(test)' : '';
+        console.log(`- **${file.path}** ${label}`);
+        console.log(`  ${file.referenceCount} references at lines: ${file.lines.slice(0, 5).join(', ')}${file.lines.length > 5 ? '...' : ''}`);
+      });
+      console.log();
+    }
+    
+    if (impact.suggestions.length > 0) {
+      console.log(`#### Suggestions`);
+      impact.suggestions.forEach((suggestion: string) => {
+        console.log(`- ${suggestion}`);
       });
       console.log();
     }

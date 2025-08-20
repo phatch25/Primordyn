@@ -1,6 +1,6 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel } from 'js-tiktoken';
-import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge } from '../types/index.js';
+import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis } from '../types/index.js';
 
 export class ContextRetriever {
   private db: PrimordynDB;
@@ -602,6 +602,323 @@ export class ContextRetriever {
     
     explore(symbolName, 0);
     return graph;
+  }
+
+  public async getImpactAnalysis(symbolName: string): Promise<ImpactAnalysis | null> {
+    const database = this.db.getDatabase();
+    
+    // First, find the symbol
+    const symbol = database.prepare(`
+      SELECT 
+        s.id as symbolId,
+        s.name,
+        s.type,
+        s.line_start as line,
+        s.file_id as fileId,
+        f.relative_path as filePath
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE s.name = ?
+      LIMIT 1
+    `).get(symbolName) as any;
+    
+    if (!symbol) {
+      // Try to find references even if symbol isn't in database
+      const references = this.findAllReferences(symbolName);
+      if (references.length === 0) {
+        return null;
+      }
+      // Create a minimal impact analysis for non-indexed symbols
+      return this.createImpactAnalysisFromReferences(symbolName, references);
+    }
+    
+    // Get all references to this symbol
+    const directReferences = database.prepare(`
+      SELECT 
+        cg.caller_file_id as fileId,
+        cg.line_number as line,
+        f.relative_path as filePath,
+        f.language,
+        cg.call_type as callType,
+        s.name as callerSymbol
+      FROM call_graph cg
+      JOIN files f ON cg.caller_file_id = f.id
+      LEFT JOIN symbols s ON cg.caller_symbol_id = s.id
+      WHERE cg.callee_name = ? OR cg.callee_symbol_id = ?
+      ORDER BY f.relative_path, cg.line_number
+    `).all(symbolName, symbol.symbolId) as any[];
+    
+    // Get text-based references (catches things AST might miss)
+    const textReferences = database.prepare(`
+      SELECT 
+        f.id as fileId,
+        f.relative_path as filePath,
+        f.content,
+        f.language
+      FROM files f
+      WHERE f.content LIKE '%' || ? || '%'
+        AND f.id != ?
+    `).all(symbolName, symbol.fileId) as any[];
+    
+    // Analyze each file for actual references
+    const affectedFiles = new Map<string, {
+      path: string;
+      referenceCount: number;
+      isTest: boolean;
+      lines: number[];
+    }>();
+    
+    // Process direct call graph references
+    directReferences.forEach(ref => {
+      const key = ref.filePath;
+      if (!affectedFiles.has(key)) {
+        affectedFiles.set(key, {
+          path: ref.filePath,
+          referenceCount: 0,
+          isTest: this.isTestFile(ref.filePath),
+          lines: []
+        });
+      }
+      const file = affectedFiles.get(key)!;
+      file.referenceCount++;
+      file.lines.push(ref.line);
+    });
+    
+    // Process text references to find additional occurrences
+    textReferences.forEach(file => {
+      const lines = file.content.split('\n');
+      const matches: number[] = [];
+      
+      lines.forEach((line: string, index: number) => {
+        if (line.includes(symbolName)) {
+          matches.push(index + 1);
+        }
+      });
+      
+      if (matches.length > 0) {
+        const key = file.filePath;
+        if (!affectedFiles.has(key)) {
+          affectedFiles.set(key, {
+            path: file.filePath,
+            referenceCount: matches.length,
+            isTest: this.isTestFile(file.filePath),
+            lines: matches
+          });
+        } else {
+          // Merge with existing data
+          const existing = affectedFiles.get(key)!;
+          existing.lines = [...new Set([...existing.lines, ...matches])].sort((a, b) => a - b);
+          existing.referenceCount = existing.lines.length;
+        }
+      }
+    });
+    
+    // Calculate impact metrics
+    const affectedFilesList = Array.from(affectedFiles.values());
+    const testFiles = affectedFilesList.filter(f => f.isTest);
+    const implementationFiles = affectedFilesList.filter(f => !f.isTest);
+    
+    // Count total references
+    const totalReferences = affectedFilesList.reduce((sum, f) => sum + f.referenceCount, 0);
+    
+    // Get unique symbols that reference this one
+    const affectedSymbols = new Set(directReferences.map(r => r.callerSymbol).filter(Boolean));
+    
+    // Categorize files
+    const impactByType = {
+      implementation: 0,
+      tests: 0,
+      configs: 0,
+      other: 0
+    };
+    
+    affectedFilesList.forEach(file => {
+      if (file.isTest) {
+        impactByType.tests++;
+      } else if (file.path.includes('config') || file.path.endsWith('.json')) {
+        impactByType.configs++;
+      } else if (file.path.endsWith('.ts') || file.path.endsWith('.js') || 
+                 file.path.endsWith('.py') || file.path.endsWith('.java')) {
+        impactByType.implementation++;
+      } else {
+        impactByType.other++;
+      }
+    });
+    
+    // Calculate risk level
+    const riskFactors: string[] = [];
+    let riskScore = 0;
+    
+    if (totalReferences > 50) {
+      riskFactors.push(`High reference count (${totalReferences})`);
+      riskScore += 3;
+    } else if (totalReferences > 20) {
+      riskFactors.push(`Moderate reference count (${totalReferences})`);
+      riskScore += 2;
+    } else if (totalReferences > 5) {
+      riskFactors.push(`Some references (${totalReferences})`);
+      riskScore += 1;
+    }
+    
+    if (affectedFilesList.length > 10) {
+      riskFactors.push(`Many files affected (${affectedFilesList.length})`);
+      riskScore += 2;
+    } else if (affectedFilesList.length > 5) {
+      riskFactors.push(`Several files affected (${affectedFilesList.length})`);
+      riskScore += 1;
+    }
+    
+    if (testFiles.length === 0 && totalReferences > 0) {
+      riskFactors.push('No test coverage detected');
+      riskScore += 2;
+    }
+    
+    if (symbol.type === 'interface' || symbol.type === 'type') {
+      riskFactors.push('Type/Interface changes affect compile-time');
+      riskScore += 1;
+    }
+    
+    if (symbol.name.toLowerCase().includes('api') || symbol.name.toLowerCase().includes('public')) {
+      riskFactors.push('Appears to be a public API');
+      riskScore += 2;
+    }
+    
+    // Determine risk level
+    let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    if (riskScore >= 7) {
+      riskLevel = 'CRITICAL';
+    } else if (riskScore >= 5) {
+      riskLevel = 'HIGH';
+    } else if (riskScore >= 3) {
+      riskLevel = 'MEDIUM';
+    } else {
+      riskLevel = 'LOW';
+    }
+    
+    // Generate suggestions
+    const suggestions: string[] = [];
+    
+    if (riskLevel === 'CRITICAL' || riskLevel === 'HIGH') {
+      suggestions.push('Consider creating a compatibility layer before making breaking changes');
+      suggestions.push('Document the migration path for consumers');
+    }
+    
+    if (testFiles.length === 0 && totalReferences > 0) {
+      suggestions.push('Add tests before modifying this symbol');
+    }
+    
+    if (totalReferences > 20) {
+      suggestions.push('Consider refactoring in stages to minimize risk');
+      suggestions.push('Use deprecation warnings before removal');
+    }
+    
+    if (symbol.type === 'interface' || symbol.type === 'type') {
+      suggestions.push('Type changes will require recompilation of dependent code');
+    }
+    
+    return {
+      symbol: symbol.name,
+      type: symbol.type,
+      location: `${symbol.filePath}:${symbol.line}`,
+      
+      directReferences: totalReferences,
+      filesAffected: affectedFilesList.length,
+      symbolsAffected: affectedSymbols.size,
+      
+      testsAffected: testFiles.length,
+      testFiles: testFiles.map(f => f.path),
+      
+      impactByType,
+      
+      riskLevel,
+      riskFactors,
+      
+      affectedFiles: affectedFilesList
+        .sort((a, b) => b.referenceCount - a.referenceCount)
+        .slice(0, 20), // Limit to top 20 files
+      
+      suggestions
+    };
+  }
+  
+  private isTestFile(filePath: string): boolean {
+    const testPatterns = [
+      '.test.', '.spec.', '_test.', '_spec.',
+      '/test/', '/tests/', '/spec/', '/specs/',
+      '/__tests__/', '/__test__/'
+    ];
+    
+    const lowerPath = filePath.toLowerCase();
+    return testPatterns.some(pattern => lowerPath.includes(pattern));
+  }
+  
+  private findAllReferences(symbolName: string): any[] {
+    const database = this.db.getDatabase();
+    
+    // Find all files that mention this symbol
+    return database.prepare(`
+      SELECT 
+        f.id as fileId,
+        f.relative_path as filePath,
+        f.content,
+        f.language
+      FROM files f
+      WHERE f.content LIKE '%' || ? || '%'
+    `).all(symbolName) as any[];
+  }
+  
+  private createImpactAnalysisFromReferences(symbolName: string, references: any[]): ImpactAnalysis {
+    const affectedFiles: ImpactAnalysis['affectedFiles'] = [];
+    
+    references.forEach(file => {
+      const lines = file.content.split('\n');
+      const matches: number[] = [];
+      
+      lines.forEach((line: string, index: number) => {
+        if (line.includes(symbolName)) {
+          matches.push(index + 1);
+        }
+      });
+      
+      if (matches.length > 0) {
+        affectedFiles.push({
+          path: file.filePath,
+          referenceCount: matches.length,
+          isTest: this.isTestFile(file.filePath),
+          lines: matches
+        });
+      }
+    });
+    
+    const testFiles = affectedFiles.filter(f => f.isTest);
+    const totalReferences = affectedFiles.reduce((sum, f) => sum + f.referenceCount, 0);
+    
+    return {
+      symbol: symbolName,
+      type: 'unknown',
+      location: 'not indexed',
+      
+      directReferences: totalReferences,
+      filesAffected: affectedFiles.length,
+      symbolsAffected: 0,
+      
+      testsAffected: testFiles.length,
+      testFiles: testFiles.map(f => f.path),
+      
+      impactByType: {
+        implementation: affectedFiles.filter(f => !f.isTest).length,
+        tests: testFiles.length,
+        configs: 0,
+        other: 0
+      },
+      
+      riskLevel: totalReferences > 10 ? 'HIGH' : totalReferences > 5 ? 'MEDIUM' : 'LOW',
+      riskFactors: [`Symbol not indexed but found ${totalReferences} text references`],
+      
+      affectedFiles: affectedFiles.sort((a, b) => b.referenceCount - a.referenceCount),
+      
+      suggestions: ['Consider indexing this symbol for better analysis']
+    };
   }
 
   public async getContextSummary(): Promise<string> {

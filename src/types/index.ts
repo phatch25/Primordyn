@@ -130,3 +130,41 @@ export interface DependencyGraph {
   calls: CallGraphEdge[];
   calledBy: CallGraphEdge[];
 }
+
+export interface ImpactAnalysis {
+  symbol: string;
+  type: string;
+  location: string;
+  
+  // Direct impact
+  directReferences: number;
+  filesAffected: number;
+  symbolsAffected: number;
+  
+  // Test impact
+  testsAffected: number;
+  testFiles: string[];
+  
+  // Breakdown by file type
+  impactByType: {
+    implementation: number;
+    tests: number;
+    configs: number;
+    other: number;
+  };
+  
+  // Risk assessment
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  riskFactors: string[];
+  
+  // Detailed affected files
+  affectedFiles: {
+    path: string;
+    referenceCount: number;
+    isTest: boolean;
+    lines: number[];
+  }[];
+  
+  // Suggestions
+  suggestions: string[];
+}
