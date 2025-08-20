@@ -38,7 +38,7 @@ Primordyn indexes your codebase and provides intelligent context retrieval optim
 ## Installation
 
 ```bash
-npm install -g primordyn
+npm install -g primordyn@alpha
 ```
 
 ## Quick Start

@@ -1,0 +1,44 @@
+# Source files (users only need dist)
+src/
+*.ts
+!dist/**/*.d.ts
+
+# Test files
+test-files/
+**/__tests__/
+*.test.js
+*.test.d.ts
+jest.config.js
+
+# Development files
+CLAUDE.md
+.claude/
+.primordyn/
+.eslintrc.json
+eslint.config.js
+tsconfig.json
+*.tsbuildinfo
+
+# Git files
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Build artifacts we don't need
+*.map
