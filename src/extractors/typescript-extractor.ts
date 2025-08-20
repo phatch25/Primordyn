@@ -1,5 +1,4 @@
 import * as parser from '@babel/parser';
-// @ts-ignore
 import traverse from '@babel/traverse';
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
@@ -123,7 +122,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       // Build structure
       context.structure = this.buildStructure(context.symbols);
       
-    } catch (error) {
+    } catch {
       // Fallback to regex-based extraction if AST parsing fails
       return this.extractWithRegex(fileInfo);
     }
@@ -131,14 +130,14 @@ export class TypeScriptExtractor extends BaseExtractor {
     return context;
   }
   
-  private extractFunction(node: any, symbols: Symbol[], name?: string): void {
+  private extractFunction(node: Record<string, any>, symbols: Symbol[], name?: string): void {
     const functionName = name || node.id?.name;
     if (!functionName) return;
     
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const params = node.params.map((p: any) => {
+    const params = node.params.map((p: Record<string, any>) => {
       if (p.type === 'Identifier') return p.name;
       if (p.type === 'RestElement' && p.argument.type === 'Identifier') return `...${p.argument.name}`;
       return '...';
@@ -160,11 +159,11 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractArrowFunction(node: any, symbols: Symbol[], name: string): void {
+  private extractArrowFunction(node: Record<string, any>, symbols: Symbol[], name: string): void {
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const params = node.params.map((p: any) => {
+    const params = node.params.map((p: Record<string, any>) => {
       if (p.type === 'Identifier') return p.name;
       if (p.type === 'RestElement' && p.argument.type === 'Identifier') return `...${p.argument.name}`;
       return '...';
@@ -186,7 +185,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractClass(node: any, symbols: Symbol[], name?: string): void {
+  private extractClass(node: Record<string, any>, symbols: Symbol[], name?: string): void {
     const className = name || node.id?.name;
     if (!className) return;
     
@@ -202,7 +201,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     const methods: string[] = [];
     const properties: string[] = [];
     
-    node.body.body.forEach((member: any) => {
+    node.body.body.forEach((member: Record<string, any>) => {
       if (member.type === 'ClassMethod' || member.type === 'MethodDefinition') {
         const methodName = member.key.type === 'Identifier' ? member.key.name : 'unknown';
         methods.push(methodName);
@@ -245,18 +244,18 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractInterface(node: any, symbols: Symbol[]): void {
+  private extractInterface(node: Record<string, any>, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
     let signature = `interface ${name}`;
     if (node.extends && node.extends.length > 0) {
-      const extendsList = node.extends.map((e: any) => e.expression.name).join(', ');
+      const extendsList = node.extends.map((e: Record<string, any>) => e.expression.name).join(', ');
       signature += ` extends ${extendsList}`;
     }
     
-    const properties = node.body.body.map((prop: any) => {
+    const properties = node.body.body.map((prop: Record<string, any>) => {
       if (prop.type === 'TSPropertySignature' && prop.key.type === 'Identifier') {
         return prop.key.name;
       }
@@ -276,7 +275,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractTypeAlias(node: any, symbols: Symbol[]): void {
+  private extractTypeAlias(node: Record<string, any>, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
@@ -291,12 +290,12 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractEnum(node: any, symbols: Symbol[]): void {
+  private extractEnum(node: Record<string, any>, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const members = node.members.map((m: any) => {
+    const members = node.members.map((m: Record<string, any>) => {
       if (m.id.type === 'Identifier') return m.id.name;
       return null;
     }).filter(Boolean);
@@ -314,7 +313,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractCall(node: any, calls: CallReference[]): void {
+  private extractCall(node: Record<string, any>, calls: CallReference[]): void {
     let calleeName = '';
     let callType: CallReference['callType'] = 'function';
     
@@ -339,7 +338,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     }
   }
   
-  private extractNewExpression(node: any, calls: CallReference[]): void {
+  private extractNewExpression(node: Record<string, any>, calls: CallReference[]): void {
     if (node.callee.type === 'Identifier') {
       calls.push({
         calleeName: node.callee.name,
@@ -362,8 +361,8 @@ export class TypeScriptExtractor extends BaseExtractor {
     return keywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): any {
-    const structure: any = {
+  private buildStructure(symbols: Symbol[]): Record<string, any> {
+    const structure: Record<string, any> = {
       functions: [],
       classes: [],
       interfaces: [],

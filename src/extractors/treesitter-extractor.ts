@@ -110,10 +110,13 @@ const LANGUAGE_CONFIG: Record<string, {
   }
 };
 
+type ParserNode = Record<string, any>;
+type TreeSitterParser = Record<string, any>;
+
 export class TreeSitterExtractor extends BaseExtractor {
-  private parser: any | null = null;
+  private parser: TreeSitterParser | null = null;
   private static initialized = false;
-  private static parsers: Map<string, any> = new Map();
+  private static parsers: Map<string, TreeSitterParser> = new Map();
   
   getSupportedLanguages(): string[] {
     return Object.keys(LANGUAGE_CONFIG);
@@ -209,7 +212,7 @@ export class TreeSitterExtractor extends BaseExtractor {
       
       // Create new parser
       // const parser = new Parser();
-      const parser = null; // Placeholder until tree-sitter is properly configured
+      const parser = {} as TreeSitterParser; // Placeholder until tree-sitter is properly configured
       
       // For now, we'll use a simplified approach
       // In production, you'd load the actual WASM files
@@ -224,7 +227,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private extractNodesByTypes(node: any, types: string[], symbolType: Symbol['type'], symbols: Symbol[]): void {
+  private extractNodesByTypes(node: ParserNode, types: string[], symbolType: Symbol['type'], symbols: Symbol[]): void {
     if (!node) return;
     
     // Check if current node matches any of the types
@@ -244,7 +247,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private nodeToSymbol(node: any, type: Symbol['type']): Symbol | null {
+  private nodeToSymbol(node: ParserNode, type: Symbol['type']): Symbol | null {
     // Extract name from node
     const nameNode = this.findNameNode(node);
     if (!nameNode) return null;
@@ -270,7 +273,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     };
   }
   
-  private findNameNode(node: any): any {
+  private findNameNode(node: ParserNode): ParserNode | null {
     // Look for common name node types
     const nameTypes = ['identifier', 'field_identifier', 'type_identifier', 'property_identifier'];
     
@@ -297,7 +300,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return null;
   }
   
-  private extractImports(node: any, types: string[], imports: string[], dependencies: string[]): void {
+  private extractImports(node: ParserNode, types: string[], imports: string[], dependencies: string[]): void {
     if (!node) return;
     
     if (types.includes(node.type)) {
@@ -321,7 +324,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private extractCalls(node: any, types: string[], calls: CallReference[]): void {
+  private extractCalls(node: ParserNode, types: string[], calls: CallReference[]): void {
     if (!node) return;
     
     if (types.includes(node.type)) {
@@ -346,7 +349,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private extractCallName(node: any): string | null {
+  private extractCallName(node: ParserNode): string | null {
     // Look for function/method name in call expression
     for (let i = 0; i < node.childCount; i++) {
       const child = node.child(i);
@@ -365,8 +368,8 @@ export class TreeSitterExtractor extends BaseExtractor {
     return null;
   }
   
-  private findLastIdentifier(node: any): any {
-    let lastIdentifier = null;
+  private findLastIdentifier(node: ParserNode): ParserNode | null {
+    const lastIdentifier = null;
     
     if (node.type === 'identifier' || node.type === 'field_identifier' || node.type === 'property_identifier') {
       return node;
@@ -399,7 +402,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return 'function';
   }
   
-  private extractTreeSitterComments(node: any, comments: string[]): void {
+  private extractTreeSitterComments(node: ParserNode, comments: string[]): void {
     if (!node) return;
     
     if (node.type === 'comment' || node.type === 'line_comment' || node.type === 'block_comment') {
@@ -416,8 +419,8 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private buildStructure(symbols: Symbol[]): any {
-    const structure: any = {};
+  private buildStructure(symbols: Symbol[]): Record<string, any> {
+    const structure: Record<string, any> = {};
     
     symbols.forEach(symbol => {
       const category = this.getCategory(symbol.type);
@@ -494,7 +497,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return context;
   }
   
-  private getLanguagePatterns(language: string): any {
+  private getLanguagePatterns(language: string): Record<string, any> {
     const patterns: Record<string, any> = {
       c: {
         functions: /^\s*(?:static\s+)?(?:inline\s+)?(?:\w+\s+)*(\w+)\s*\([^)]*\)\s*\{/gm,

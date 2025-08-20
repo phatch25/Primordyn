@@ -339,8 +339,8 @@ export class PythonExtractor extends BaseExtractor {
     return keywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): any {
-    const structure: any = {
+  private buildStructure(symbols: Symbol[]): Record<string, any> {
+    const structure: Record<string, any> = {
       functions: [],
       classes: [],
       methods: []

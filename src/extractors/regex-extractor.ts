@@ -214,7 +214,7 @@ export class RegexExtractor extends BaseExtractor {
         /require\s+([\w:]+)/gm
       ],
       variables: [
-        /(?:my|our|local)\s+[\$@%](\w+)/gm
+        /(?:my|our|local)\s+[$@%](\w+)/gm
       ],
       comments: [
         /#.*$/gm,
@@ -352,8 +352,8 @@ export class RegexExtractor extends BaseExtractor {
         /type\s+(\w+)(?:\*)?(?:\[[^\]]+\])?\s*=/gm
       ],
       imports: [
-        /import\s+([\w\/]+)/gm,
-        /from\s+([\w\/]+)\s+import/gm
+        /import\s+([\w/]+)/gm,
+        /from\s+([\w/]+)\s+import/gm
       ],
       comments: [
         /#.*$/gm,
@@ -592,7 +592,7 @@ export class RegexExtractor extends BaseExtractor {
     return Math.min(startLine + 10, this.lines.length);
   }
   
-  private extractFunctionCalls(language: string): CallReference[] {
+  private extractFunctionCalls(_language: string): CallReference[] {
     const calls: CallReference[] = [];
     
     // Language-specific call patterns
@@ -607,7 +607,7 @@ export class RegexExtractor extends BaseExtractor {
       while ((match = pattern.exec(this.content)) !== null) {
         const name = match[2] ? `${match[1]}.${match[2]}` : match[1];
         
-        if (!this.isKeyword(name, language)) {
+        if (!this.isKeyword(name, _language)) {
           calls.push({
             calleeName: name,
             callType: match[0].startsWith('new') ? 'constructor' : 
@@ -623,7 +623,7 @@ export class RegexExtractor extends BaseExtractor {
     return calls;
   }
   
-  private isKeyword(word: string, language: string): boolean {
+  private isKeyword(word: string, _language: string): boolean {
     const commonKeywords = new Set([
       'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
       'return', 'throw', 'try', 'catch', 'finally', 'class', 'function',
@@ -633,8 +633,8 @@ export class RegexExtractor extends BaseExtractor {
     return commonKeywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): any {
-    const structure: any = {};
+  private buildStructure(symbols: Symbol[]): Record<string, any> {
+    const structure: Record<string, any> = {};
     
     symbols.forEach(symbol => {
       const category = this.getCategory(symbol.type);

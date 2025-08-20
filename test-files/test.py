@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Test Python file for multi-language support."""
 
-import os
-import sys
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 class DataProcessor:
     """Processes various types of data."""
@@ -12,7 +10,7 @@ class DataProcessor:
         self.name = name
         self.data: List[Dict] = []
     
-    def process(self, items: List[str]) -> Dict[str, any]:
+    def process(self, items: List[str]) -> Dict[str, Any]:
         """Process a list of items."""
         result = {}
         for item in items:
