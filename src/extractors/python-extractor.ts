@@ -1,5 +1,6 @@
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
+import type { StructureCategory, SymbolDetail } from './types.js';
 
 export class PythonExtractor extends BaseExtractor {
   getSupportedLanguages(): string[] {
@@ -339,18 +340,18 @@ export class PythonExtractor extends BaseExtractor {
     return keywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): Record<string, any> {
-    const structure: Record<string, any> = {
+  private buildStructure(symbols: Symbol[]): StructureCategory {
+    const structure: StructureCategory = {
       functions: [],
       classes: [],
       methods: []
     };
     
     symbols.forEach(symbol => {
-      const detail = {
+      const detail: SymbolDetail = {
         name: symbol.name,
         line: symbol.lineStart,
-        signature: symbol.signature
+        signature: symbol.signature || ''
       };
       
       switch (symbol.type) {

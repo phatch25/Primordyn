@@ -1,5 +1,6 @@
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
+import type { StructureCategory, SymbolDetail } from './types.js';
 
 interface LanguagePattern {
   functions?: RegExp[];
@@ -633,8 +634,8 @@ export class RegexExtractor extends BaseExtractor {
     return commonKeywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): Record<string, any> {
-    const structure: Record<string, any> = {};
+  private buildStructure(symbols: Symbol[]): StructureCategory {
+    const structure: StructureCategory = {};
     
     symbols.forEach(symbol => {
       const category = this.getCategory(symbol.type);
@@ -642,11 +643,12 @@ export class RegexExtractor extends BaseExtractor {
         structure[category] = [];
       }
       
-      structure[category].push({
+      const detail: SymbolDetail = {
         name: symbol.name,
         line: symbol.lineStart,
-        signature: symbol.signature
-      });
+        signature: symbol.signature || ''
+      };
+      structure[category].push(detail);
     });
     
     return structure;

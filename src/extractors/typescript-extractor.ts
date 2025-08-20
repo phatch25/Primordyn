@@ -2,6 +2,17 @@ import * as parser from '@babel/parser';
 import traverse from '@babel/traverse';
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
+import type { 
+  BabelNode, 
+  BabelIdentifier, 
+  BabelClassMember, 
+  BabelTSNode, 
+  BabelTSPropertySignature,
+  BabelTSEnumMember,
+  BabelTSExpressionWithTypeArguments,
+  BabelExportSpecifier,
+  StructureCategory
+} from './types.js';
 
 export class TypeScriptExtractor extends BaseExtractor {
   getSupportedLanguages(): string[] {
@@ -54,34 +65,34 @@ export class TypeScriptExtractor extends BaseExtractor {
       // Traverse AST
       traverse(ast, {
         FunctionDeclaration: (path) => {
-          this.extractFunction(path.node, context.symbols);
+          this.extractFunction(path.node as unknown as BabelNode, context.symbols);
         },
         FunctionExpression: (path) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
-            this.extractFunction(path.node, context.symbols, path.parent.id.name);
+            this.extractFunction(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
         ArrowFunctionExpression: (path) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
-            this.extractArrowFunction(path.node, context.symbols, path.parent.id.name);
+            this.extractArrowFunction(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
         ClassDeclaration: (path) => {
-          this.extractClass(path.node, context.symbols);
+          this.extractClass(path.node as unknown as BabelNode, context.symbols);
         },
         ClassExpression: (path) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
-            this.extractClass(path.node, context.symbols, path.parent.id.name);
+            this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
           }
         },
         TSInterfaceDeclaration: (path) => {
-          this.extractInterface(path.node, context.symbols);
+          this.extractInterface(path.node as unknown as BabelTSNode, context.symbols);
         },
         TSTypeAliasDeclaration: (path) => {
-          this.extractTypeAlias(path.node, context.symbols);
+          this.extractTypeAlias(path.node as unknown as BabelTSNode, context.symbols);
         },
         TSEnumDeclaration: (path) => {
-          this.extractEnum(path.node, context.symbols);
+          this.extractEnum(path.node as unknown as BabelTSNode, context.symbols);
         },
         ImportDeclaration: (path) => {
           const source = path.node.source.value;
@@ -96,7 +107,7 @@ export class TypeScriptExtractor extends BaseExtractor {
             }
           }
           if (path.node.specifiers) {
-            path.node.specifiers.forEach((spec: any) => {
+            (path.node.specifiers as unknown as BabelExportSpecifier[]).forEach((spec: BabelExportSpecifier) => {
               if (spec.exported && 'name' in spec.exported) {
                 context.exports.push(spec.exported.name);
               }
@@ -107,16 +118,16 @@ export class TypeScriptExtractor extends BaseExtractor {
           context.exports.push('default');
         },
         CallExpression: (path) => {
-          this.extractCall(path.node, context.calls);
+          this.extractCall(path.node as unknown as BabelNode, context.calls);
         },
         NewExpression: (path) => {
-          this.extractNewExpression(path.node, context.calls);
+          this.extractNewExpression(path.node as unknown as BabelNode, context.calls);
         }
       });
       
       // Extract comments
-      if (ast.comments) {
-        context.comments = ast.comments.map(comment => comment.value);
+      if ('comments' in ast && Array.isArray(ast.comments)) {
+        context.comments = ast.comments.map((comment: { value: string }) => comment.value);
       }
       
       // Build structure
@@ -130,16 +141,16 @@ export class TypeScriptExtractor extends BaseExtractor {
     return context;
   }
   
-  private extractFunction(node: Record<string, any>, symbols: Symbol[], name?: string): void {
+  private extractFunction(node: BabelNode, symbols: Symbol[], name?: string): void {
     const functionName = name || node.id?.name;
     if (!functionName) return;
     
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const params = node.params.map((p: Record<string, any>) => {
+    const params = (node.params || []).map((p: BabelNode) => {
       if (p.type === 'Identifier') return p.name;
-      if (p.type === 'RestElement' && p.argument.type === 'Identifier') return `...${p.argument.name}`;
+      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') return `...${p.argument.name}`;
       return '...';
     }).join(', ');
     
@@ -154,18 +165,18 @@ export class TypeScriptExtractor extends BaseExtractor {
       metadata: {
         async: node.async || false,
         generator: node.generator || false,
-        params: node.params.length
+        params: node.params?.length || 0
       }
     });
   }
   
-  private extractArrowFunction(node: Record<string, any>, symbols: Symbol[], name: string): void {
+  private extractArrowFunction(node: BabelNode, symbols: Symbol[], name: string): void {
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const params = node.params.map((p: Record<string, any>) => {
+    const params = (node.params || []).map((p: BabelNode) => {
       if (p.type === 'Identifier') return p.name;
-      if (p.type === 'RestElement' && p.argument.type === 'Identifier') return `...${p.argument.name}`;
+      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') return `...${p.argument.name}`;
       return '...';
     }).join(', ');
     
@@ -180,12 +191,12 @@ export class TypeScriptExtractor extends BaseExtractor {
       metadata: {
         async: node.async || false,
         arrow: true,
-        params: node.params.length
+        params: node.params?.length || 0
       }
     });
   }
   
-  private extractClass(node: Record<string, any>, symbols: Symbol[], name?: string): void {
+  private extractClass(node: BabelNode, symbols: Symbol[], name?: string): void {
     const className = name || node.id?.name;
     if (!className) return;
     
@@ -201,9 +212,10 @@ export class TypeScriptExtractor extends BaseExtractor {
     const methods: string[] = [];
     const properties: string[] = [];
     
-    node.body.body.forEach((member: Record<string, any>) => {
+    const classBody = node.body as { body: BabelClassMember[] };
+    classBody.body.forEach((member: BabelClassMember) => {
       if (member.type === 'ClassMethod' || member.type === 'MethodDefinition') {
-        const methodName = member.key.type === 'Identifier' ? member.key.name : 'unknown';
+        const methodName = member.key && member.key.type === 'Identifier' && member.key.name ? member.key.name : 'unknown';
         methods.push(methodName);
         
         // Also add methods as separate symbols
@@ -224,7 +236,7 @@ export class TypeScriptExtractor extends BaseExtractor {
           }
         });
       } else if (member.type === 'ClassProperty' || member.type === 'PropertyDefinition') {
-        const propName = member.key.type === 'Identifier' ? member.key.name : 'unknown';
+        const propName = member.key && member.key.type === 'Identifier' && member.key.name ? member.key.name : 'unknown';
         properties.push(propName);
       }
     });
@@ -244,18 +256,21 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractInterface(node: Record<string, any>, symbols: Symbol[]): void {
+  private extractInterface(node: BabelTSNode, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
     let signature = `interface ${name}`;
     if (node.extends && node.extends.length > 0) {
-      const extendsList = node.extends.map((e: Record<string, any>) => e.expression.name).join(', ');
+      const extendsList = node.extends.map((e: BabelTSExpressionWithTypeArguments) => 
+        (e.expression as BabelIdentifier).name
+      ).join(', ');
       signature += ` extends ${extendsList}`;
     }
     
-    const properties = node.body.body.map((prop: Record<string, any>) => {
+    const interfaceBody = node.body as { body: BabelTSPropertySignature[] };
+    const properties = interfaceBody.body.map((prop: BabelTSPropertySignature) => {
       if (prop.type === 'TSPropertySignature' && prop.key.type === 'Identifier') {
         return prop.key.name;
       }
@@ -275,7 +290,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractTypeAlias(node: Record<string, any>, symbols: Symbol[]): void {
+  private extractTypeAlias(node: BabelTSNode, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
@@ -290,12 +305,12 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractEnum(node: Record<string, any>, symbols: Symbol[]): void {
+  private extractEnum(node: BabelTSNode, symbols: Symbol[]): void {
     const name = node.id.name;
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
-    const members = node.members.map((m: Record<string, any>) => {
+    const members = (node.members || []).map((m: BabelTSEnumMember) => {
       if (m.id.type === 'Identifier') return m.id.name;
       return null;
     }).filter(Boolean);
@@ -308,28 +323,30 @@ export class TypeScriptExtractor extends BaseExtractor {
       signature: `enum ${name}`,
       metadata: {
         members,
-        const: node.const || false
+        const: (node as any).const || false
       }
     });
   }
   
-  private extractCall(node: Record<string, any>, calls: CallReference[]): void {
+  private extractCall(node: BabelNode, calls: CallReference[]): void {
+    if (!node.callee) return;
+    
     let calleeName = '';
     let callType: CallReference['callType'] = 'function';
     
     if (node.callee.type === 'Identifier') {
-      calleeName = node.callee.name;
+      calleeName = node.callee.name || '';
       callType = 'function';
     } else if (node.callee.type === 'MemberExpression') {
-      const obj = node.callee.object.type === 'Identifier' ? node.callee.object.name : 'unknown';
-      const prop = node.callee.property.type === 'Identifier' ? node.callee.property.name : 'unknown';
+      const obj = node.callee.object && node.callee.object.type === 'Identifier' && node.callee.object.name ? node.callee.object.name : 'unknown';
+      const prop = node.callee.property && node.callee.property.type === 'Identifier' && node.callee.property.name ? node.callee.property.name : 'unknown';
       calleeName = `${obj}.${prop}`;
       callType = 'method';
     }
     
     if (calleeName && !this.isKeyword(calleeName)) {
       calls.push({
-        calleeName,
+        calleeName: calleeName || '',
         callType,
         line: node.loc?.start.line || 1,
         column: node.loc?.start.column || 0,
@@ -338,8 +355,10 @@ export class TypeScriptExtractor extends BaseExtractor {
     }
   }
   
-  private extractNewExpression(node: Record<string, any>, calls: CallReference[]): void {
-    if (node.callee.type === 'Identifier') {
+  private extractNewExpression(node: BabelNode, calls: CallReference[]): void {
+    if (!node.callee) return;
+    
+    if (node.callee.type === 'Identifier' && node.callee.name) {
       calls.push({
         calleeName: node.callee.name,
         callType: 'constructor',
@@ -361,8 +380,8 @@ export class TypeScriptExtractor extends BaseExtractor {
     return keywords.has(word);
   }
   
-  private buildStructure(symbols: Symbol[]): Record<string, any> {
-    const structure: Record<string, any> = {
+  private buildStructure(symbols: Symbol[]): StructureCategory {
+    const structure: StructureCategory = {
       functions: [],
       classes: [],
       interfaces: [],
@@ -375,7 +394,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       const detail = {
         name: symbol.name,
         line: symbol.lineStart,
-        signature: symbol.signature
+        signature: symbol.signature || ''
       };
       
       switch (symbol.type) {

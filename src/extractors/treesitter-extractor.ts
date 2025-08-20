@@ -2,6 +2,7 @@
 // import Parser from 'web-tree-sitter';
 import { BaseExtractor } from './base.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
+import type { TreeSitterNode, StructureCategory, SymbolDetail } from './types.js';
 // import { fileURLToPath } from 'url';
 // import { dirname, join } from 'path';
 // const __filename = fileURLToPath(import.meta.url);
@@ -110,8 +111,11 @@ const LANGUAGE_CONFIG: Record<string, {
   }
 };
 
-type ParserNode = Record<string, any>;
-type TreeSitterParser = Record<string, any>;
+type ParserNode = TreeSitterNode;
+type TreeSitterParser = {
+  parse(input: string): { rootNode: ParserNode; delete(): void };
+  setLanguage(language: unknown): void;
+};
 
 export class TreeSitterExtractor extends BaseExtractor {
   private parser: TreeSitterParser | null = null;
@@ -386,7 +390,7 @@ export class TreeSitterExtractor extends BaseExtractor {
     return lastIdentifier;
   }
   
-  private determineCallType(node: any): CallReference['callType'] {
+  private determineCallType(node: ParserNode): CallReference['callType'] {
     if (node.type === 'object_creation_expression' || node.type === 'new_expression') {
       return 'constructor';
     }
@@ -419,8 +423,8 @@ export class TreeSitterExtractor extends BaseExtractor {
     }
   }
   
-  private buildStructure(symbols: Symbol[]): Record<string, any> {
-    const structure: Record<string, any> = {};
+  private buildStructure(symbols: Symbol[]): StructureCategory {
+    const structure: StructureCategory = {};
     
     symbols.forEach(symbol => {
       const category = this.getCategory(symbol.type);
@@ -428,11 +432,12 @@ export class TreeSitterExtractor extends BaseExtractor {
         structure[category] = [];
       }
       
-      structure[category].push({
+      const detail: SymbolDetail = {
         name: symbol.name,
         line: symbol.lineStart,
-        signature: symbol.signature
-      });
+        signature: symbol.signature || ''
+      };
+      structure[category].push(detail);
     });
     
     return structure;
@@ -497,8 +502,16 @@ export class TreeSitterExtractor extends BaseExtractor {
     return context;
   }
   
-  private getLanguagePatterns(language: string): Record<string, any> {
-    const patterns: Record<string, any> = {
+  private getLanguagePatterns(language: string): {
+    functions?: RegExp;
+    classes?: RegExp;
+    imports?: RegExp;
+  } {
+    const patterns: Record<string, {
+      functions?: RegExp;
+      classes?: RegExp;
+      imports?: RegExp;
+    }> = {
       c: {
         functions: /^\s*(?:static\s+)?(?:inline\s+)?(?:\w+\s+)*(\w+)\s*\([^)]*\)\s*\{/gm,
         classes: /^\s*(?:typedef\s+)?struct\s+(\w+)/gm,
