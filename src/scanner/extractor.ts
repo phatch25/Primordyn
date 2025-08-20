@@ -1,4 +1,4 @@
-import type { FileInfo, Symbol, ExtractedContext, CallReference } from '../types/index.js';
+import type { FileInfo, Symbol, ExtractedContext, CallReference, CodeStructure, SymbolDetail } from '../types/index.js';
 
 interface LanguagePattern {
   function: RegExp[];
@@ -190,8 +190,20 @@ export class ContextExtractor {
 
     // Extract classes and other structures
     if (patterns.class) {
-      patterns.class.forEach(pattern => {
-        this.extractSymbolsByPattern(pattern, 'class', context.symbols);
+      patterns.class.forEach((pattern) => {
+        // Determine the correct type based on the pattern
+        let type: Symbol['type'] = 'class';
+        const patternStr = pattern.source;
+        
+        if (patternStr.includes('interface')) {
+          type = 'interface';
+        } else if (patternStr.includes('type\\s')) {
+          type = 'type';
+        } else if (patternStr.includes('enum')) {
+          type = 'enum';
+        }
+        
+        this.extractSymbolsByPattern(pattern, type, context.symbols);
       });
     }
 
@@ -332,8 +344,8 @@ export class ContextExtractor {
     return symbolStarts.some(start => trimmed.startsWith(start));
   }
 
-  private buildStructure(symbols: Symbol[]): any {
-    const structure: any = {
+  private buildStructure(symbols: Symbol[]): CodeStructure {
+    const structure: CodeStructure = {
       functions: [],
       classes: [],
       interfaces: [],
@@ -344,19 +356,38 @@ export class ContextExtractor {
 
     symbols.forEach(symbol => {
       const category = this.categorizeSymbol(symbol.type);
-      if (structure[category]) {
-        structure[category].push({
-          name: symbol.name,
-          line: symbol.lineStart,
-          signature: symbol.signature
-        });
+      const detail: SymbolDetail = {
+        name: symbol.name,
+        line: symbol.lineStart,
+        signature: symbol.signature
+      };
+      
+      switch (category) {
+        case 'functions':
+          structure.functions?.push(detail);
+          break;
+        case 'classes':
+          structure.classes?.push(detail);
+          break;
+        case 'interfaces':
+          structure.interfaces?.push(detail);
+          break;
+        case 'types':
+          structure.types?.push(detail);
+          break;
+        case 'variables':
+          structure.variables?.push(detail);
+          break;
+        case 'other':
+          structure.other?.push(detail);
+          break;
       }
     });
 
     // Remove empty categories
-    Object.keys(structure).forEach(key => {
-      if (structure[key].length === 0) {
-        delete structure[key];
+    Object.entries(structure).forEach(([key, value]) => {
+      if (value && value.length === 0) {
+        delete structure[key as keyof CodeStructure];
       }
     });
 
@@ -369,8 +400,8 @@ export class ContextExtractor {
     
     // Define patterns for different types of function calls
     const patterns = {
-      // Function calls: functionName(args)
-      functionCall: /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
+      // Function calls: functionName(args) - but not new ClassName(
+      functionCall: /\b(?<!new\s)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
       // Method calls: object.method(args)
       methodCall: /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g,
       // Constructor calls: new ClassName(args)
@@ -378,11 +409,35 @@ export class ContextExtractor {
       // Import statements for tracking external dependencies
       importCall: /(?:import|require)\s*\(?\s*['"`]([^'"`]+)['"`]\s*\)?/g
     };
+    
+    // Extract constructor calls first to avoid duplicate detection
+    patterns.constructorCall.lastIndex = 0;
+    let match;
+    const constructorPositions = new Set<number>();
+    while ((match = patterns.constructorCall.exec(this.content)) !== null) {
+      const className = match[1];
+      const lineNumber = this.getLineNumber(match.index);
+      const column = this.getColumnNumber(match.index);
+      constructorPositions.add(match.index);
+      
+      calls.push({
+        calleeName: className,
+        callType: 'constructor',
+        line: lineNumber,
+        column: column,
+        isExternal: false
+      });
+    }
 
     // Extract function calls
-    let match;
+    patterns.functionCall.lastIndex = 0;
     while ((match = patterns.functionCall.exec(this.content)) !== null) {
       const functionName = match[1];
+      // Skip if this is actually a constructor call we already captured
+      const beforeMatch = this.content.substring(Math.max(0, match.index - 10), match.index);
+      if (beforeMatch.match(/\bnew\s+$/)) {
+        continue;
+      }
       // Filter out language keywords and common false positives
       if (!this.isLanguageKeyword(functionName, language)) {
         const lineNumber = this.getLineNumber(match.index);
@@ -409,22 +464,6 @@ export class ContextExtractor {
       calls.push({
         calleeName: `${objectName}.${methodName}`,
         callType: 'method',
-        line: lineNumber,
-        column: column,
-        isExternal: false
-      });
-    }
-    
-    // Extract constructor calls
-    patterns.constructorCall.lastIndex = 0;
-    while ((match = patterns.constructorCall.exec(this.content)) !== null) {
-      const className = match[1];
-      const lineNumber = this.getLineNumber(match.index);
-      const column = this.getColumnNumber(match.index);
-      
-      calls.push({
-        calleeName: className,
-        callType: 'constructor',
         line: lineNumber,
         column: column,
         isExternal: false

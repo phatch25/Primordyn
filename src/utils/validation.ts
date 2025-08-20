@@ -27,7 +27,7 @@ export function validateTokenLimit(value: string): number {
 
 export function validateFormat(value: string): 'ai' | 'json' | 'human' {
   const validFormats = ['ai', 'json', 'human'] as const;
-  if (!validFormats.includes(value as any)) {
+  if (!validFormats.includes(value as typeof validFormats[number])) {
     throw new ValidationError(
       `Invalid format: "${value}". Must be one of: ${validFormats.join(', ')}`
     );

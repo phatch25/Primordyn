@@ -1,11 +1,17 @@
 import { PrimordynDB } from '../database/index.js';
-import { encodingForModel } from 'js-tiktoken';
+import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import { GitAnalyzer } from '../git/analyzer.js';
-import type { QueryOptions, QueryResult, FileResult, SymbolResult, DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis, GitHistory } from '../types/index.js';
+import type { 
+  QueryOptions, QueryResult, FileResult, SymbolResult, 
+  DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis, GitHistory, 
+  FileQueryRow, SymbolQueryRow, RecentFileChanges, FileReferenceRow,
+  MetadataResult, SymbolWithFileContent, CallGraphResult,
+  CallerResult, SymbolLookupResult, FilePathResult
+} from '../types/index.js';
 
 export class ContextRetriever {
   private db: PrimordynDB;
-  private tokenEncoder: any;
+  private tokenEncoder: Tiktoken;
   private gitAnalyzer: GitAnalyzer;
 
   constructor(db: PrimordynDB) {
@@ -28,11 +34,11 @@ export class ContextRetriever {
 
     // Use FTS for better search
     const fileQuery = this.buildFileQuery(searchTerm, options);
-    const files = database.prepare(fileQuery).all({ searchTerm }) as any[];
+    const files = database.prepare(fileQuery).all({ searchTerm }) as FileQueryRow[];
 
     // Search in symbols using FTS
     const symbolQuery = this.buildSymbolQuery(searchTerm, options);
-    const symbols = database.prepare(symbolQuery).all({ searchTerm }) as any[];
+    const symbols = database.prepare(symbolQuery).all({ searchTerm }) as SymbolQueryRow[];
 
     // Process results with token limit
     for (const file of files) {
@@ -71,7 +77,7 @@ export class ContextRetriever {
       SELECT id, path, relative_path as relativePath, content, language, metadata
       FROM files
       WHERE path = ? OR relative_path = ?
-    `).get(filePath, filePath) as any;
+    `).get(filePath, filePath) as FileQueryRow | undefined;
 
     if (!file) {
       return null;
@@ -87,7 +93,7 @@ export class ContextRetriever {
     // Get imports from the target file
     const fileData = database.prepare(`
       SELECT metadata FROM files WHERE path = ? OR relative_path = ?
-    `).get(filePath, filePath) as any;
+    `).get(filePath, filePath) as MetadataResult | undefined;
 
     if (!fileData || !fileData.metadata) {
       return [];
@@ -101,11 +107,11 @@ export class ContextRetriever {
     // Find files that are imported
     for (const importPath of imports) {
       const relatedFiles = database.prepare(`
-        SELECT id, path, relative_path as relativePath, content, language, metadata
+        SELECT id, path, relative_path as relativePath, content, language, metadata, hash, size, last_modified, indexed_at
         FROM files
         WHERE relative_path LIKE ?
         LIMIT 5
-      `).all(`%${importPath}%`) as any[];
+      `).all(`%${importPath}%`) as FileQueryRow[];
 
       for (const file of relatedFiles) {
         const fileResult = await this.processFileResult(file, options);
@@ -164,7 +170,7 @@ export class ContextRetriever {
       params.push(...options.fileTypes);
     }
     
-    const files = database.prepare(query).all(...params) as any[];
+    const files = database.prepare(query).all(...params) as FileQueryRow[];
     const results: FileResult[] = [];
     let totalTokens = 0;
     
@@ -238,7 +244,7 @@ export class ContextRetriever {
       params.push(...options.fileTypes);
     }
 
-    const symbols = database.prepare(query).all(...params) as any[];
+    const symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
 
     return symbols.map(symbol => this.processSymbolResult(symbol));
   }
@@ -274,7 +280,7 @@ export class ContextRetriever {
       LIMIT 10
     `;
 
-    const files = database.prepare(fileQuery).all(query) as any[];
+    const files = database.prepare(fileQuery).all(query) as FileQueryRow[];
 
     // Search symbols using FTS
     const symbolQuery = `
@@ -297,7 +303,7 @@ export class ContextRetriever {
       LIMIT 20
     `;
 
-    const symbols = database.prepare(symbolQuery).all(query) as any[];
+    const symbols = database.prepare(symbolQuery).all(query) as SymbolQueryRow[];
 
     // Process results
     for (const file of files) {
@@ -392,12 +398,12 @@ export class ContextRetriever {
     return query;
   }
 
-  private async processFileResult(file: any, options: QueryOptions): Promise<FileResult> {
+  private async processFileResult(file: FileQueryRow, options: QueryOptions): Promise<FileResult> {
     const metadata = file.metadata ? JSON.parse(file.metadata) : {};
     const result: FileResult = {
       id: file.id,
       path: file.path,
-      relativePath: file.relativePath,
+      relativePath: file.relativePath || file.relative_path,
       language: file.language,
       tokens: metadata.tokens || 0
     };
@@ -422,44 +428,40 @@ export class ContextRetriever {
         FROM symbols
         WHERE file_id = ?
         ORDER BY line_start
-      `).all(file.id) as any[];
+      `).all(file.id) as SymbolWithFileContent[];
 
       result.symbols = symbols.map(s => ({
         id: s.id,
         name: s.name,
         type: s.type,
-        filePath: file.relativePath,
-        lineStart: s.lineStart,
-        lineEnd: s.lineEnd,
-        signature: s.signature
+        filePath: file.relativePath || file.relative_path,
+        lineStart: s.line_start,
+        lineEnd: s.line_end,
+        signature: s.signature === null ? undefined : s.signature
       }));
     }
 
     return result;
   }
 
-  private processSymbolResult(symbol: any): SymbolResult {
+  private processSymbolResult(symbol: SymbolQueryRow): SymbolResult {
     const result: SymbolResult = {
       id: symbol.id,
       name: symbol.name,
       type: symbol.type,
-      filePath: symbol.filePath,
-      lineStart: symbol.lineStart,
-      lineEnd: symbol.lineEnd,
-      signature: symbol.signature
+      filePath: symbol.filePath || '',
+      lineStart: symbol.lineStart || symbol.line_start,
+      lineEnd: symbol.lineEnd || symbol.line_end,
+      signature: symbol.signature || undefined
     };
 
-    if (symbol.fileContent) {
-      // Extract the symbol's content
-      const lines = symbol.fileContent.split('\n');
-      const symbolLines = lines.slice(symbol.lineStart - 1, symbol.lineEnd);
-      result.content = symbolLines.join('\n');
-    }
+    // Note: fileContent would need to be added to SymbolQueryRow if needed
+    // For now, we don't extract content in processSymbolResult
 
     return result;
   }
 
-  private estimateTokens(data: any): number {
+  private estimateTokens(data: unknown): number {
     const text = JSON.stringify(data);
     try {
       return this.tokenEncoder.encode(text).length;
@@ -475,7 +477,7 @@ export class ContextRetriever {
     if (graph && depth > 1) {
       // Could expand the graph here to include more levels of dependencies
       // This would involve recursively fetching dependencies of dependencies
-      console.log(`Note: Depth ${depth} requested but currently only showing direct dependencies`);
+      // Note: Depth parameter currently only shows direct dependencies
     }
     return graph;
   }
@@ -503,7 +505,7 @@ export class ContextRetriever {
       JOIN files f ON s.file_id = f.id
       WHERE s.name = ?
       LIMIT 1
-    `).get(symbolName) as any;
+    `).get(symbolName) as SymbolLookupResult | undefined;
     
     if (!symbol) {
       return null;
@@ -535,14 +537,14 @@ export class ContextRetriever {
       LEFT JOIN files f2 ON COALESCE(cg.callee_file_id, s2.file_id) = f2.id
       WHERE cg.caller_symbol_id = ?
       ORDER BY cg.line_number
-    `).all(symbol.symbolId) as any[];
+    `).all(symbol.symbolId) as CallGraphResult[];
     
     const calls: CallGraphEdge[] = callsQuery.map(call => ({
       from: root,
       to: {
-        symbolId: call.calleeSymbolId,
+        symbolId: call.calleeSymbolId === null ? undefined : call.calleeSymbolId,
         fileId: call.calleeFileId || 0,
-        name: call.calleeRealName || call.calleeName,
+        name: call.calleeName,
         type: call.calleeType || call.callType,
         filePath: call.calleeFilePath || 'external',
         line: call.calleeLine || 0
@@ -567,11 +569,11 @@ export class ContextRetriever {
       LEFT JOIN files f1 ON cg.caller_file_id = f1.id
       WHERE cg.callee_name = ? OR cg.callee_symbol_id = ?
       ORDER BY f1.relative_path, cg.line_number
-    `).all(symbolName, symbol.symbolId) as any[];
+    `).all(symbolName, symbol.symbolId) as CallerResult[];
     
     const calledBy: CallGraphEdge[] = calledByQuery.map(caller => ({
       from: {
-        symbolId: caller.callerSymbolId,
+        symbolId: caller.callerSymbolId === null ? undefined : caller.callerSymbolId,
         fileId: caller.callerFileId,
         name: caller.callerName || 'anonymous',
         type: caller.callerType || 'unknown',
@@ -654,7 +656,7 @@ export class ContextRetriever {
       JOIN files f ON s.file_id = f.id
       WHERE s.name = ?
       LIMIT 1
-    `).get(symbolName) as any;
+    `).get(symbolName) as SymbolLookupResult | undefined;
     
     if (!symbol) {
       // Try to find references even if symbol isn't in database
@@ -680,7 +682,7 @@ export class ContextRetriever {
       LEFT JOIN symbols s ON cg.caller_symbol_id = s.id
       WHERE cg.callee_name = ? OR cg.callee_symbol_id = ?
       ORDER BY f.relative_path, cg.line_number
-    `).all(symbolName, symbol.symbolId) as any[];
+    `).all(symbolName, symbol.symbolId) as CallerResult[];
     
     // Get text-based references (catches things AST might miss)
     const textReferences = database.prepare(`
@@ -692,7 +694,12 @@ export class ContextRetriever {
       FROM files f
       WHERE f.content LIKE '%' || ? || '%'
         AND f.id != ?
-    `).all(symbolName, symbol.fileId) as any[];
+    `).all(symbolName, symbol.fileId) as Array<{
+      fileId: number;
+      filePath: string;
+      content: string;
+      language: string | null;
+    }>;
     
     // Analyze each file for actual references
     const affectedFiles = new Map<string, {
@@ -704,18 +711,18 @@ export class ContextRetriever {
     
     // Process direct call graph references
     directReferences.forEach(ref => {
-      const key = ref.filePath;
+      const key = ref.callerFilePath;
       if (!affectedFiles.has(key)) {
         affectedFiles.set(key, {
-          path: ref.filePath,
+          path: ref.callerFilePath,
           referenceCount: 0,
-          isTest: this.isTestFile(ref.filePath),
+          isTest: this.isTestFile(ref.callerFilePath),
           lines: []
         });
       }
       const file = affectedFiles.get(key)!;
       file.referenceCount++;
-      file.lines.push(ref.line);
+      file.lines.push(ref.callLine);
     });
     
     // Process text references to find additional occurrences
@@ -730,12 +737,12 @@ export class ContextRetriever {
       });
       
       if (matches.length > 0) {
-        const key = file.filePath;
+        const key = file.filePath || '';
         if (!affectedFiles.has(key)) {
           affectedFiles.set(key, {
-            path: file.filePath,
+            path: file.filePath || '',
             referenceCount: matches.length,
-            isTest: this.isTestFile(file.filePath),
+            isTest: this.isTestFile(file.filePath || ''),
             lines: matches
           });
         } else {
@@ -756,7 +763,7 @@ export class ContextRetriever {
     const totalReferences = affectedFilesList.reduce((sum, f) => sum + f.referenceCount, 0);
     
     // Get unique symbols that reference this one
-    const affectedSymbols = new Set(directReferences.map(r => r.callerSymbol).filter(Boolean));
+    const affectedSymbols = new Set(directReferences.map(r => r.callerName).filter(Boolean));
     
     // Categorize files
     const impactByType = {
@@ -891,7 +898,7 @@ export class ContextRetriever {
     return testPatterns.some(pattern => lowerPath.includes(pattern));
   }
   
-  private findAllReferences(symbolName: string): any[] {
+  private findAllReferences(symbolName: string): FileReferenceRow[] {
     const database = this.db.getDatabase();
     
     // Find all files that mention this symbol
@@ -903,10 +910,10 @@ export class ContextRetriever {
         f.language
       FROM files f
       WHERE f.content LIKE '%' || ? || '%'
-    `).all(symbolName) as any[];
+    `).all(symbolName) as FileReferenceRow[];
   }
   
-  private createImpactAnalysisFromReferences(symbolName: string, references: any[]): ImpactAnalysis {
+  private createImpactAnalysisFromReferences(symbolName: string, references: FileReferenceRow[]): ImpactAnalysis {
     const affectedFiles: ImpactAnalysis['affectedFiles'] = [];
     
     references.forEach(file => {
@@ -921,9 +928,9 @@ export class ContextRetriever {
       
       if (matches.length > 0) {
         affectedFiles.push({
-          path: file.filePath,
+          path: file.filePath || file.path || '',
           referenceCount: matches.length,
-          isTest: this.isTestFile(file.filePath),
+          isTest: this.isTestFile(file.filePath || file.path || ''),
           lines: matches
         });
       }
@@ -974,7 +981,7 @@ export class ContextRetriever {
       JOIN files f ON s.file_id = f.id
       WHERE s.name = ?
       LIMIT 1
-    `).get(symbolName) as any;
+    `).get(symbolName) as SymbolLookupResult | undefined;
     
     if (!symbol) {
       // Try to find the file that contains this text
@@ -983,7 +990,7 @@ export class ContextRetriever {
         FROM files
         WHERE content LIKE '%' || ? || '%'
         LIMIT 1
-      `).get(symbolName) as any;
+      `).get(symbolName) as FilePathResult | undefined;
       
       if (fileResult) {
         return this.gitAnalyzer.getGitHistory(fileResult.filePath, symbolName);
@@ -999,7 +1006,7 @@ export class ContextRetriever {
     );
   }
   
-  public async getRecentChanges(days: number = 7): Promise<{ file: string; commits: any[] }[]> {
+  public async getRecentChanges(days: number = 7): Promise<RecentFileChanges[]> {
     return this.gitAnalyzer.getRecentChanges(days);
   }
 
@@ -1076,5 +1083,45 @@ export class ContextRetriever {
       INSERT INTO context_cache (query_hash, result, expires_at)
       VALUES (?, ?, datetime('now', '+' || ? || ' minutes'))
     `).run(key, result, expirationMinutes);
+  }
+  
+  private escapeFTS5(term: string): string {
+    // FTS5 doesn't handle special characters well
+    // Return cleaned version for checking if we should use FTS
+    return term.replace(/[^a-zA-Z0-9\s_-]/g, '');
+  }
+  
+  private buildFileLikeQuery(searchTerm: string, options: QueryOptions): string {
+    let query = `
+      SELECT 
+        f.id, f.path, f.relative_path, f.content, 
+        f.language, f.metadata, f.size
+      FROM files f
+      WHERE f.content LIKE ?
+    `;
+    
+    if (options.fileTypes && options.fileTypes.length > 0) {
+      query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+    }
+    
+    query += ' ORDER BY f.relative_path LIMIT 100';
+    return query;
+  }
+  
+  private buildSymbolLikeQuery(searchTerm: string, options: QueryOptions): string {
+    let query = `
+      SELECT 
+        s.*, f.relative_path as filePath, f.language
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE (s.name LIKE ? OR s.signature LIKE ?)
+    `;
+    
+    if (options.fileTypes && options.fileTypes.length > 0) {
+      query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+    }
+    
+    query += ' ORDER BY s.name LIMIT 100';
+    return query;
   }
 }

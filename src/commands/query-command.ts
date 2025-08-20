@@ -321,7 +321,7 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
     result.usages.slice(0, 10).forEach((file) => {
       console.log(`- **${file.relativePath}**`);
       if (file.metadata && typeof file.metadata === 'object' && 'usageLines' in file.metadata) {
-        const usageLines = (file.metadata as any).usageLines;
+        const usageLines = (file.metadata as { usageLines?: number[] }).usageLines;
         if (Array.isArray(usageLines)) {
           const lines = usageLines.slice(0, 3);
           console.log(`  Lines: ${lines.join(', ')}${usageLines.length > 3 ? '...' : ''}`);

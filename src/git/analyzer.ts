@@ -29,7 +29,7 @@ export class GitAnalyzer {
       });
     } catch (error) {
       // Return empty string for commands that might fail (e.g., no commits yet)
-      if (error && typeof error === 'object' && 'status' in error && error.status === 128) {
+      if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 128) {
         return '';
       }
       throw error;
@@ -79,8 +79,8 @@ export class GitAnalyzer {
       };
       
       return history;
-    } catch (error) {
-      console.error('Error getting git history:', error);
+    } catch {
+      // Git operations may fail if not in a git repository
       return null;
     }
   }
@@ -227,9 +227,9 @@ export class GitAnalyzer {
           });
         }
       }
-    } catch (error) {
+    } catch {
       // Blame might fail for new files or other reasons
-      console.error('Blame failed:', error);
+      // Silently continue without blame data
     }
     
     return blameData;

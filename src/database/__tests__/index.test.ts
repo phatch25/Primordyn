@@ -78,11 +78,11 @@ describe('PrimordynDB', () => {
     
     // Retrieve the file
     const file = database.prepare('SELECT * FROM files WHERE path = ?')
-      .get('/test/file.ts') as any;
+      .get('/test/file.ts') as { content: string; language: string } | undefined;
     
     expect(file).toBeTruthy();
-    expect(file.content).toBe('const test = 1;');
-    expect(file.language).toBe('typescript');
+    expect(file?.content).toBe('const test = 1;');
+    expect(file?.language).toBe('typescript');
   });
 
   test('should handle cleanup of expired cache', () => {
