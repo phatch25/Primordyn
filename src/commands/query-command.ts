@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import { ContextRetriever } from '../retriever/index.js';
-import { QueryCommandOptions, QueryCommandResult, FileResult, SymbolResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
+import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
+import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
 import chalk from 'chalk';
 
 export const queryCommand = new Command('query')
@@ -19,18 +20,23 @@ export const queryCommand = new Command('query')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
+      // Validate inputs
+      const validatedSearchTerm = validateSearchTerm(searchTerm);
+      const maxTokens = validateTokenLimit(options.tokens);
+      const format = validateFormat(options.format);
+      const depth = validateDepth(options.depth);
+      const fileTypes = options.languages ? validateLanguages(options.languages) : undefined;
+      const days = options.recent ? validateDays(options.recent) : undefined;
+      
       const db = new PrimordynDB();
       const retriever = new ContextRetriever(db);
-      
-      const fileTypes = options.languages ? options.languages.split(',').map((t: string) => t.trim()) : undefined;
-      const maxTokens = parseInt(options.tokens);
       // const depth = parseInt(options.depth); // For future context expansion
       
       // First, try to find as a symbol
-      const symbols = await retriever.findSymbol(searchTerm, { fileTypes });
+      const symbols = await retriever.findSymbol(validatedSearchTerm, { fileTypes });
       
       // Then get broader context
-      const searchResult = await retriever.query(searchTerm, {
+      const searchResult = await retriever.query(validatedSearchTerm, {
         maxTokens,
         includeContent: true,
         includeSymbols: true,
@@ -42,31 +48,30 @@ export const queryCommand = new Command('query')
       // Find usages if requested
       let usages: FileResult[] = [];
       if (options.includeCallers && symbols.length > 0) {
-        usages = await retriever.findUsages(searchTerm, { fileTypes, maxTokens: 2000 });
+        usages = await retriever.findUsages(validatedSearchTerm, { fileTypes, maxTokens: 2000 });
       }
       
-      // Get dependency graph if requested
+      // Get dependency graph if requested (using depth for call graph traversal)
       let dependencyGraph: DependencyGraph | null = null;
       if (options.showGraph) {
-        dependencyGraph = await retriever.getDependencyGraph(searchTerm);
+        dependencyGraph = await retriever.getDependencyGraphWithDepth(validatedSearchTerm, depth);
       }
       
       // Get impact analysis if requested
       let impactAnalysis: ImpactAnalysis | null = null;
       if (options.impact) {
-        impactAnalysis = await retriever.getImpactAnalysis(searchTerm);
+        impactAnalysis = await retriever.getImpactAnalysis(validatedSearchTerm);
       }
       
       // Get git history if requested
       let gitHistory: GitHistory | null = null;
       if (options.recent || options.blame) {
-        gitHistory = await retriever.getGitHistory(searchTerm);
+        gitHistory = await retriever.getGitHistory(validatedSearchTerm);
       }
       
       // Get recent changes if requested
       let recentChanges: RecentFileChanges[] | null = null;
-      if (options.recent) {
-        const days = parseInt(options.recent) || 7;
+      if (days) {
         recentChanges = await retriever.getRecentChanges(days);
       }
       
@@ -85,23 +90,27 @@ export const queryCommand = new Command('query')
       };
       
       // Handle different output formats
-      switch (options.format) {
+      switch (format) {
         case 'json':
           console.log(JSON.stringify(result, null, 2));
           break;
           
         case 'ai':
-          outputAIFormat(searchTerm, result, options);
+          outputAIFormat(validatedSearchTerm, result, options);
           break;
           
         default:
-          outputHumanFormat(searchTerm, result, options);
+          outputHumanFormat(validatedSearchTerm, result, options);
       }
       
       db.close();
       
     } catch (error) {
-      console.error(chalk.red('❌ Query failed:'), error instanceof Error ? error.message : error);
+      if (error instanceof ValidationError) {
+        console.error(chalk.red('❌ Validation error:'), error.message);
+      } else {
+        console.error(chalk.red('❌ Query failed:'), error instanceof Error ? error.message : error);
+      }
       process.exit(1);
     }
   });

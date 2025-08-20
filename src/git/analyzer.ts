@@ -27,9 +27,9 @@ export class GitAnalyzer {
         encoding: 'utf8',
         maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large outputs
       });
-    } catch (error: any) {
+    } catch (error) {
       // Return empty string for commands that might fail (e.g., no commits yet)
-      if (error.status === 128) {
+      if (error && typeof error === 'object' && 'status' in error && error.status === 128) {
         return '';
       }
       throw error;

@@ -3,12 +3,12 @@ import { FileScanner } from '../scanner/index.js';
 import { ContextExtractor } from '../scanner/extractor.js';
 import ora from 'ora';
 import chalk from 'chalk';
-import { encodingForModel } from 'js-tiktoken';
+import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import type { FileInfo, ScanOptions, IndexOptions, IndexStats } from '../types/index.js';
 
 export class Indexer {
   private db: PrimordynDB;
-  private tokenEncoder: any;
+  private tokenEncoder: Tiktoken;
 
   constructor(db: PrimordynDB) {
     this.db = db;

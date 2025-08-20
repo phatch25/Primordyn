@@ -468,8 +468,27 @@ export class ContextRetriever {
     }
   }
 
+  public async getDependencyGraphWithDepth(symbolName: string, depth: number = 1): Promise<DependencyGraph | null> {
+    // For now, depth is used to control how deep we traverse the call graph
+    // Future enhancement: use depth to expand the graph to include more levels
+    const graph = await this.getDependencyGraph(symbolName);
+    if (graph && depth > 1) {
+      // Could expand the graph here to include more levels of dependencies
+      // This would involve recursively fetching dependencies of dependencies
+      console.log(`Note: Depth ${depth} requested but currently only showing direct dependencies`);
+    }
+    return graph;
+  }
+  
   public async getDependencyGraph(symbolName: string): Promise<DependencyGraph | null> {
     const database = this.db.getDatabase();
+    
+    // Check cache first
+    const cacheKey = `dep_graph_${symbolName}`;
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached as DependencyGraph;
+    }
     
     // First, find the symbol
     const symbol = database.prepare(`
@@ -564,11 +583,16 @@ export class ContextRetriever {
       line: caller.callLine
     }));
     
-    return {
+    const result = {
       root,
       calls,
       calledBy
     };
+    
+    // Cache the result for 5 minutes
+    this.saveToCache(cacheKey, result, 5);
+    
+    return result;
   }
 
   public async getCallGraph(symbolName: string, depth: number = 1): Promise<Map<string, Set<string>>> {
@@ -609,6 +633,13 @@ export class ContextRetriever {
 
   public async getImpactAnalysis(symbolName: string): Promise<ImpactAnalysis | null> {
     const database = this.db.getDatabase();
+    
+    // Check cache first
+    const cacheKey = `impact_${symbolName}`;
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached as ImpactAnalysis;
+    }
     
     // First, find the symbol
     const symbol = database.prepare(`
@@ -819,7 +850,7 @@ export class ContextRetriever {
       suggestions.push('Type changes will require recompilation of dependent code');
     }
     
-    return {
+    const impact: ImpactAnalysis = {
       symbol: symbol.name,
       type: symbol.type,
       location: `${symbol.filePath}:${symbol.line}`,
@@ -842,6 +873,11 @@ export class ContextRetriever {
       
       suggestions
     };
+    
+    // Cache the result for 10 minutes
+    this.saveToCache(cacheKey, impact, 10);
+    
+    return impact;
   }
   
   private isTestFile(filePath: string): boolean {
@@ -1009,5 +1045,36 @@ export class ContextRetriever {
     }
 
     return summary;
+  }
+  
+  private getFromCache(key: string): unknown | null {
+    const database = this.db.getDatabase();
+    const cached = database.prepare(`
+      SELECT result FROM context_cache 
+      WHERE query_hash = ? AND expires_at > datetime('now')
+    `).get(key) as { result: string } | undefined;
+    
+    if (cached) {
+      try {
+        return JSON.parse(cached.result);
+      } catch {
+        // Invalid cache entry, ignore
+      }
+    }
+    return null;
+  }
+  
+  private saveToCache(key: string, data: unknown, expirationMinutes: number = 15): void {
+    const database = this.db.getDatabase();
+    const result = JSON.stringify(data);
+    
+    // Delete existing cache entry if exists
+    database.prepare('DELETE FROM context_cache WHERE query_hash = ?').run(key);
+    
+    // Insert new cache entry
+    database.prepare(`
+      INSERT INTO context_cache (query_hash, result, expires_at)
+      VALUES (?, ?, datetime('now', '+' || ? || ' minutes'))
+    `).run(key, result, expirationMinutes);
   }
 }
