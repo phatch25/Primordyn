@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
-import { ContextRetriever } from '../retriever/index.js';
 import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
 
@@ -11,7 +10,6 @@ export const statsCommand = new Command('stats')
   .action(async (options) => {
     try {
       const db = new PrimordynDB();
-      const retriever = new ContextRetriever(db);
       const indexer = new Indexer(db);
       
       const dbInfo = await db.getDatabaseInfo();

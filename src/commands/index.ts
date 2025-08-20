@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { indexCommand } from './index-command.js';
 import { queryCommand } from './query-command.js';
 import { statsCommand } from './stats-command.js';
+import { clearCommand } from './clear-command.js';
 import chalk from 'chalk';
 
 export function createCLI(): Command {
@@ -20,6 +21,7 @@ export function createCLI(): Command {
   program.addCommand(indexCommand);
   program.addCommand(queryCommand);
   program.addCommand(statsCommand);
+  program.addCommand(clearCommand);
 
   // Global error handler
   program.exitOverride((err) => {

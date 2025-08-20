@@ -120,6 +120,90 @@ export class ContextRetriever {
     return results;
   }
 
+  public async findUsages(symbolName: string, options: QueryOptions = {}): Promise<FileResult[]> {
+    const database = this.db.getDatabase();
+    const maxTokens = options.maxTokens || 4000;
+    
+    // Search for files that contain references to this symbol
+    // This includes imports, function calls, class instantiations, etc.
+    const query = `
+      SELECT DISTINCT
+        f.id,
+        f.path,
+        f.relative_path as relativePath,
+        f.content,
+        f.language,
+        f.metadata,
+        f.size,
+        f.last_modified as lastModified
+      FROM files f
+      WHERE 
+        -- Check in file content (excluding the definition file)
+        f.content LIKE '%' || ? || '%'
+        AND f.id NOT IN (
+          SELECT DISTINCT file_id 
+          FROM symbols 
+          WHERE name = ?
+        )
+      ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
+      ORDER BY 
+        CASE 
+          WHEN f.relative_path LIKE '%test%' THEN 1
+          WHEN f.relative_path LIKE '%spec%' THEN 1
+          ELSE 0
+        END,
+        f.relative_path
+      LIMIT 20
+    `;
+    
+    const params = [symbolName, symbolName];
+    if (options.fileTypes?.length) {
+      params.push(...options.fileTypes);
+    }
+    
+    const files = database.prepare(query).all(...params) as any[];
+    const results: FileResult[] = [];
+    let totalTokens = 0;
+    
+    for (const file of files) {
+      // Check if the file actually uses the symbol (not just mentions in comments)
+      const lines = file.content.split('\n');
+      const usageLines: number[] = [];
+      
+      lines.forEach((line: string, index: number) => {
+        // Look for actual usage patterns
+        if (
+          line.includes(`new ${symbolName}`) ||  // Class instantiation
+          line.includes(`${symbolName}(`) ||      // Function call
+          line.includes(`${symbolName}.`) ||      // Static method/property
+          line.includes(`<${symbolName}`) ||      // JSX/Type usage
+          line.includes(`: ${symbolName}`) ||     // Type annotation
+          line.includes(`extends ${symbolName}`) || // Inheritance
+          line.includes(`implements ${symbolName}`) || // Interface implementation
+          line.includes(`from '.*${symbolName}`) || // Import
+          line.includes(`import.*${symbolName}`)    // Import
+        ) {
+          usageLines.push(index + 1);
+        }
+      });
+      
+      if (usageLines.length > 0) {
+        const fileResult = await this.processFileResult(file, options);
+        fileResult.metadata = { usageLines };
+        
+        const fileTokens = this.estimateTokens(fileResult);
+        if (totalTokens + fileTokens > maxTokens) {
+          break;
+        }
+        
+        results.push(fileResult);
+        totalTokens += fileTokens;
+      }
+    }
+    
+    return results;
+  }
+  
   public async findSymbol(symbolName: string, options: QueryOptions = {}): Promise<SymbolResult[]> {
     const database = this.db.getDatabase();
 

@@ -14,7 +14,7 @@ async function main() {
 }
 
 // Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   console.error(chalk.red('❌ Unhandled promise rejection:'), reason);
   process.exit(1);
 });

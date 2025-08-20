@@ -79,6 +79,7 @@ export interface FileResult {
   symbols?: SymbolResult[];
   imports?: string[];
   exports?: string[];
+  metadata?: any;
 }
 
 export interface SymbolResult {

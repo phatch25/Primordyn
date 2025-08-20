@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
-import { createInterface } from 'readline';
 
 export const indexCommand = new Command('index')
   .description('Build or update the local context index for AI agents')
