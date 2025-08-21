@@ -49,6 +49,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       // Parse with Babel
       const ast = parser.parse(this.content, {
         sourceType: 'module',
+        attachComment: true,  // Attach comments to AST nodes
         plugins: [
           'typescript',
           'jsx',
@@ -158,6 +159,9 @@ export class TypeScriptExtractor extends BaseExtractor {
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
+    // Extract JSDoc comments
+    const documentation = this.extractJSDoc(node);
+    
     const params = (node.params || []).map((p: BabelNode) => {
       if (p.type === 'Identifier') {
         // Include type annotation if available
@@ -191,6 +195,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       lineStart,
       lineEnd,
       signature,
+      documentation,
       metadata: {
         async: node.async || false,
         generator: node.generator || false,
@@ -250,6 +255,9 @@ export class TypeScriptExtractor extends BaseExtractor {
     const lineStart = node.loc?.start.line || 1;
     const lineEnd = node.loc?.end.line || lineStart;
     
+    // Extract JSDoc comments
+    const documentation = this.extractJSDoc(node);
+    
     let signature = `class ${className}`;
     if (node.superClass) {
       const superName = node.superClass.type === 'Identifier' ? node.superClass.name : 'unknown';
@@ -294,6 +302,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       lineStart,
       lineEnd,
       signature,
+      documentation,
       metadata: {
         extends: node.superClass ? true : false,
         methods,
@@ -546,5 +555,33 @@ export class TypeScriptExtractor extends BaseExtractor {
       default:
         return 'any';
     }
+  }
+  
+  private extractJSDoc(node: any): string | undefined {
+    // Check for leading comments (JSDoc typically appears before the node)
+    const leadingComments = node.leadingComments;
+    if (!leadingComments || leadingComments.length === 0) {
+      return undefined;
+    }
+    
+    // Find JSDoc comments (start with /** )
+    const jsdocComment = leadingComments.find((comment: any) => 
+      comment.type === 'CommentBlock' && comment.value.startsWith('*')
+    );
+    
+    if (!jsdocComment) {
+      return undefined;
+    }
+    
+    // Clean up the JSDoc comment
+    const lines = jsdocComment.value.split('\n');
+    const cleanedLines = lines.map((line: string) => {
+      // Remove leading asterisks and spaces
+      return line.replace(/^\s*\*\s?/, '').trim();
+    }).filter((line: string) => line.length > 0);
+    
+    // Join lines and limit length
+    const documentation = cleanedLines.join(' ');
+    return documentation.length > 500 ? documentation.substring(0, 497) + '...' : documentation;
   }
 }

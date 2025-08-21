@@ -157,8 +157,69 @@ export class ContextRetriever {
     const database = this.db.getDatabase();
     const maxTokens = options.maxTokens || 4000;
     
-    // Search for files that contain references to this symbol
-    // This includes imports, function calls, class instantiations, etc.
+    // First, try to find actual call graph references
+    const callGraphQuery = `
+      SELECT DISTINCT
+        f.id,
+        f.path,
+        f.relative_path as relativePath,
+        f.content,
+        f.language,
+        f.metadata,
+        f.size,
+        f.last_modified as lastModified,
+        cg.line_number as callLine,
+        cg.call_type as callType
+      FROM call_graph cg
+      JOIN files f ON cg.caller_file_id = f.id
+      WHERE cg.callee_name = ?
+      ORDER BY f.relative_path
+      LIMIT 20
+    `;
+    
+    const callGraphResults = database.prepare(callGraphQuery).all(symbolName) as Array<FileQueryRow & { callLine: number; callType: string }>;
+    
+    // If we have call graph results, use those
+    if (callGraphResults.length > 0) {
+      const results: FileResult[] = [];
+      let totalTokens = 0;
+      const fileMap = new Map<number, { file: FileQueryRow; calls: Array<{ line: number; type: string }> }>();
+      
+      // Group calls by file
+      for (const result of callGraphResults) {
+        if (!fileMap.has(result.id)) {
+          fileMap.set(result.id, { 
+            file: result, 
+            calls: [] 
+          });
+        }
+        fileMap.get(result.id)!.calls.push({ 
+          line: result.callLine, 
+          type: result.callType 
+        });
+      }
+      
+      // Process each file with its calls
+      for (const { file, calls } of fileMap.values()) {
+        const fileResult = await this.processFileResult(file, options);
+        fileResult.metadata = { 
+          actualCalls: calls,
+          callCount: calls.length 
+        };
+        
+        const fileTokens = this.estimateTokens(fileResult);
+        if (totalTokens + fileTokens > maxTokens) {
+          break;
+        }
+        
+        results.push(fileResult);
+        totalTokens += fileTokens;
+      }
+      
+      return results;
+    }
+    
+    // Fall back to text-based search if no call graph data
     const query = `
       SELECT DISTINCT
         f.id,

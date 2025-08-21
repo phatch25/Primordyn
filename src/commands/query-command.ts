@@ -131,6 +131,13 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
       console.log(`\`\`\`\n`);
     }
     
+    // Show documentation if available
+    if ((sym as any).documentation) {
+      console.log(`### Documentation`);
+      console.log((sym as any).documentation);
+      console.log();
+    }
+    
     if (sym.content) {
       console.log(`### Implementation`);
       console.log(`\`\`\`typescript`);
@@ -154,24 +161,13 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
     result.files.slice(0, 5).forEach((file) => {
       console.log(`- **${file.relativePath}** (${file.tokens} tokens)`);
       
-      // Show imports/exports if relevant
+      // Always show imports/exports for context, not just relevant ones
       if (file.imports && file.imports.length > 0) {
-        const relevantImports = file.imports.filter((imp: string) => 
-          imp.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          searchTerm.toLowerCase().includes(imp.toLowerCase())
-        );
-        if (relevantImports.length > 0) {
-          console.log(`  - Imports: ${relevantImports.join(', ')}`);
-        }
+        console.log(`  - Imports: ${file.imports.slice(0, 5).join(', ')}${file.imports.length > 5 ? ` (+${file.imports.length - 5} more)` : ''}`);
       }
       
       if (file.exports && file.exports.length > 0) {
-        const relevantExports = file.exports.filter((exp: string) =>
-          exp.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-        if (relevantExports.length > 0) {
-          console.log(`  - Exports: ${relevantExports.join(', ')}`);
-        }
+        console.log(`  - Exports: ${file.exports.slice(0, 5).join(', ')}${file.exports.length > 5 ? ` (+${file.exports.length - 5} more)` : ''}`);
       }
       
       // Show symbols in this file
