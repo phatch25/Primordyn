@@ -18,6 +18,7 @@ export const queryCommand = new Command('query')
   .option('--recent <days>', 'Show commits from last N days (default: 7)')
   .option('--blame', 'Show git blame (who last modified each line)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
+  .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs
@@ -27,13 +28,14 @@ export const queryCommand = new Command('query')
       const depth = validateDepth(options.depth);
       const fileTypes = options.languages ? validateLanguages(options.languages) : undefined;
       const days = options.recent ? validateDays(options.recent) : undefined;
+      const symbolType = options.type;
       
       const db = new PrimordynDB();
       const retriever = new ContextRetriever(db);
       // const depth = parseInt(options.depth); // For future context expansion
       
       // First, try to find as a symbol
-      const symbols = await retriever.findSymbol(validatedSearchTerm, { fileTypes });
+      const symbols = await retriever.findSymbol(validatedSearchTerm, { fileTypes, symbolType });
       
       // Then get broader context
       const searchResult = await retriever.query(validatedSearchTerm, {
@@ -42,6 +44,7 @@ export const queryCommand = new Command('query')
         includeSymbols: true,
         includeImports: true,
         fileTypes,
+        symbolType,
         sortBy: 'relevance'
       });
       

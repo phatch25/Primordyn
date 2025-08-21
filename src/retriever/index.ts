@@ -1,6 +1,7 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import { GitAnalyzer } from '../git/analyzer.js';
+import Fuse from 'fuse.js';
 import type { 
   QueryOptions, QueryResult, FileResult, SymbolResult, 
   DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis, GitHistory, 
@@ -62,6 +63,19 @@ export class ContextRetriever {
         symbolParams.push(...options.fileTypes);
       }
       symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
+    }
+    
+    // Apply fuzzy matching if results are limited or for typo tolerance
+    if (symbols.length < 5 && searchTerm.length > 2) {
+      const fuzzySymbols = await this.fuzzySearchSymbols(searchTerm, options);
+      // Merge fuzzy results with existing ones, avoiding duplicates
+      const existingIds = new Set(symbols.map(s => s.id));
+      for (const fuzzySymbol of fuzzySymbols) {
+        if (!existingIds.has(fuzzySymbol.id)) {
+          symbols.push(fuzzySymbol);
+          if (symbols.length >= 20) break; // Limit fuzzy results
+        }
+      }
     }
 
     // Process results with token limit
@@ -323,6 +337,7 @@ export class ContextRetriever {
         JOIN symbols s ON fts.rowid = s.id
         JOIN files f ON s.file_id = f.id
         WHERE symbols_fts MATCH ?
+        ${options.symbolType ? `AND s.type = '${options.symbolType}'` : ''}
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
         ORDER BY 
           bm25(symbols_fts),
@@ -352,6 +367,7 @@ export class ContextRetriever {
         FROM symbols s
         JOIN files f ON s.file_id = f.id
         WHERE s.name LIKE ?
+        ${options.symbolType ? `AND s.type = '${options.symbolType}'` : ''}
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
         ORDER BY 
           CASE WHEN s.name = ? THEN 0 ELSE 1 END,
@@ -1279,6 +1295,47 @@ export class ContextRetriever {
     
     // For single terms, use prefix matching to be more flexible
     return terms[0] + '*';
+  }
+  
+  private async fuzzySearchSymbols(searchTerm: string, options: QueryOptions = {}): Promise<SymbolQueryRow[]> {
+    const database = this.db.getDatabase();
+    
+    // Get all symbols for fuzzy matching
+    let query = `
+      SELECT 
+        s.id,
+        s.file_id,
+        s.name,
+        s.type,
+        s.line_start as lineStart,
+        s.line_end as lineEnd,
+        s.signature,
+        s.documentation,
+        s.metadata,
+        f.relative_path as filePath,
+        f.language
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+    `;
+    
+    if (options.fileTypes && options.fileTypes.length > 0) {
+      query += ` WHERE f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+    }
+    
+    const allSymbols = database.prepare(query).all(...(options.fileTypes || [])) as SymbolQueryRow[];
+    
+    // Configure Fuse for fuzzy matching
+    const fuse = new Fuse(allSymbols, {
+      keys: ['name', 'signature'],
+      threshold: 0.4, // Adjust for typo tolerance (0 = exact, 1 = match anything)
+      includeScore: true,
+      ignoreLocation: true,
+      minMatchCharLength: 2
+    });
+    
+    // Search and return top matches
+    const results = fuse.search(searchTerm);
+    return results.slice(0, 10).map(r => r.item);
   }
   
   private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {

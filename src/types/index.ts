@@ -65,6 +65,7 @@ export interface QueryOptions {
   includeSymbols?: boolean;
   includeImports?: boolean;
   fileTypes?: string[];
+  symbolType?: string;
   sortBy?: 'relevance' | 'path' | 'size' | 'modified';
 }
 
@@ -240,6 +241,7 @@ export interface QueryCommandOptions {
   recent?: string;
   blame?: boolean;
   languages?: string;
+  type?: string;
 }
 
 export interface FindCommandOptions {
