@@ -1207,9 +1207,17 @@ export class ContextRetriever {
       return '';
     }
     
-    // For FTS5, we need to wrap terms with special chars in quotes
-    // But since we're removing them, just return the cleaned version
-    return cleaned.trim();
+    // Split into multiple terms and handle each one
+    const terms = cleaned.trim().split(/\s+/).filter(t => t.length > 0);
+    
+    // For multi-term search, use OR to find any term (more inclusive)
+    // This helps with queries like "database sqlite" finding files with either term
+    if (terms.length > 1) {
+      return terms.join(' OR ');
+    }
+    
+    // For single terms, use prefix matching to be more flexible
+    return terms[0] + '*';
   }
   
   private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {

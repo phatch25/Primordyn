@@ -159,12 +159,31 @@ export class TypeScriptExtractor extends BaseExtractor {
     const lineEnd = node.loc?.end.line || lineStart;
     
     const params = (node.params || []).map((p: BabelNode) => {
-      if (p.type === 'Identifier') return p.name;
-      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') return `...${p.argument.name}`;
+      if (p.type === 'Identifier') {
+        // Include type annotation if available
+        const typeAnnotation = (p as any).typeAnnotation;
+        if (typeAnnotation?.typeAnnotation) {
+          const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
+          return `${p.name}: ${typeStr}`;
+        }
+        return p.name;
+      }
+      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') {
+        const typeAnnotation = (p.argument as any).typeAnnotation;
+        if (typeAnnotation?.typeAnnotation) {
+          const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
+          return `...${p.argument.name}: ${typeStr}`;
+        }
+        return `...${p.argument.name}`;
+      }
       return '...';
     }).join(', ');
     
-    const signature = `${node.async ? 'async ' : ''}function ${functionName}(${params})`;
+    // Include return type if available
+    const returnType = (node as any).returnType?.typeAnnotation;
+    const returnTypeStr = returnType ? `: ${this.getTypeString(returnType)}` : '';
+    
+    const signature = `${node.async ? 'async ' : ''}function ${functionName}(${params})${returnTypeStr}`;
     
     symbols.push({
       name: functionName,
@@ -185,12 +204,30 @@ export class TypeScriptExtractor extends BaseExtractor {
     const lineEnd = node.loc?.end.line || lineStart;
     
     const params = (node.params || []).map((p: BabelNode) => {
-      if (p.type === 'Identifier') return p.name;
-      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') return `...${p.argument.name}`;
+      if (p.type === 'Identifier') {
+        const typeAnnotation = (p as any).typeAnnotation;
+        if (typeAnnotation?.typeAnnotation) {
+          const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
+          return `${p.name}: ${typeStr}`;
+        }
+        return p.name;
+      }
+      if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') {
+        const typeAnnotation = (p.argument as any).typeAnnotation;
+        if (typeAnnotation?.typeAnnotation) {
+          const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
+          return `...${p.argument.name}: ${typeStr}`;
+        }
+        return `...${p.argument.name}`;
+      }
       return '...';
     }).join(', ');
     
-    const signature = `const ${name} = ${node.async ? 'async ' : ''}(${params}) => ...`;
+    // Include return type if available
+    const returnType = (node as any).returnType?.typeAnnotation;
+    const returnTypeStr = returnType ? `: ${this.getTypeString(returnType)}` : '';
+    
+    const signature = `const ${name} = ${node.async ? 'async ' : ''}(${params})${returnTypeStr} => ...`;
     
     symbols.push({
       name,
@@ -458,5 +495,56 @@ export class TypeScriptExtractor extends BaseExtractor {
     // (reuse patterns from existing implementation)
     
     return context;
+  }
+  
+  private getTypeString(typeAnnotation: any): string {
+    if (!typeAnnotation) return 'any';
+    
+    switch (typeAnnotation.type) {
+      case 'TSStringKeyword':
+        return 'string';
+      case 'TSNumberKeyword':
+        return 'number';
+      case 'TSBooleanKeyword':
+        return 'boolean';
+      case 'TSAnyKeyword':
+        return 'any';
+      case 'TSUnknownKeyword':
+        return 'unknown';
+      case 'TSVoidKeyword':
+        return 'void';
+      case 'TSNullKeyword':
+        return 'null';
+      case 'TSUndefinedKeyword':
+        return 'undefined';
+      case 'TSArrayType':
+        return `${this.getTypeString(typeAnnotation.elementType)}[]`;
+      case 'TSTypeReference':
+        if (typeAnnotation.typeName?.type === 'Identifier') {
+          const typeName = typeAnnotation.typeName.name;
+          if (typeAnnotation.typeParameters?.params?.length > 0) {
+            const params = typeAnnotation.typeParameters.params
+              .map((p: any) => this.getTypeString(p))
+              .join(', ');
+            return `${typeName}<${params}>`;
+          }
+          return typeName;
+        }
+        return 'unknown';
+      case 'TSUnionType':
+        return typeAnnotation.types
+          .map((t: any) => this.getTypeString(t))
+          .join(' | ');
+      case 'TSIntersectionType':
+        return typeAnnotation.types
+          .map((t: any) => this.getTypeString(t))
+          .join(' & ');
+      case 'TSFunctionType':
+        return 'Function';
+      case 'TSTypeLiteral':
+        return 'object';
+      default:
+        return 'any';
+    }
   }
 }
