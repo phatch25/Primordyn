@@ -33,40 +33,48 @@ export class ContextRetriever {
       truncated: false
     };
 
-    // Check if we can use FTS5 or need to fall back to LIKE
-    const escapedTerm = this.escapeFTS5(searchTerm);
-    const useFTS = escapedTerm.length > 0 && escapedTerm !== '';
+    // First check if the search term looks like a file path
+    const isFilePathSearch = this.looksLikeFilePath(searchTerm);
     
-    let files: FileQueryRow[];
-    let symbols: SymbolQueryRow[];
+    let files: FileQueryRow[] = [];
+    let symbols: SymbolQueryRow[] = [];
     
-    if (useFTS) {
-      // Use FTS for better search
-      const fileQuery = this.buildFileQuery(escapedTerm, options);
-      files = database.prepare(fileQuery).all({ searchTerm: escapedTerm }) as FileQueryRow[];
-
-      // Search in symbols using FTS
-      const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
-      symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
+    if (isFilePathSearch) {
+      // Specialized file path search
+      files = await this.searchByFilePath(searchTerm, options);
     } else {
-      // Fall back to LIKE queries for special characters
-      const fileQuery = this.buildFileLikeQuery(searchTerm, options);
-      const params = [`%${searchTerm}%`];
-      if (options.fileTypes?.length) {
-        params.push(...options.fileTypes);
-      }
-      files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
+      // Check if we can use FTS5 or need to fall back to LIKE
+      const escapedTerm = this.escapeFTS5(searchTerm);
+      const useFTS = escapedTerm.length > 0 && escapedTerm !== '';
       
-      const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
-      const symbolParams = [`%${searchTerm}%`, `%${searchTerm}%`];
-      if (options.fileTypes?.length) {
-        symbolParams.push(...options.fileTypes);
+      if (useFTS) {
+        // Use FTS for better search
+        const fileQuery = this.buildFileQuery(escapedTerm, options);
+        files = database.prepare(fileQuery).all({ searchTerm: escapedTerm }) as FileQueryRow[];
+
+        // Search in symbols using FTS
+        const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
+        symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
+      } else {
+        // Fall back to LIKE queries for special characters
+        const fileQuery = this.buildFileLikeQuery(searchTerm, options);
+        const params = [`%${searchTerm}%`, `%${searchTerm}%`];
+        if (options.fileTypes?.length) {
+          params.push(...options.fileTypes);
+        }
+        files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
+        
+        const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
+        const symbolParams = [`%${searchTerm}%`, `%${searchTerm}%`];
+        if (options.fileTypes?.length) {
+          symbolParams.push(...options.fileTypes);
+        }
+        symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
       }
-      symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
     }
     
     // Apply fuzzy matching if results are limited or for typo tolerance
-    if (symbols.length < 5 && searchTerm.length > 2) {
+    if (symbols.length < 5 && searchTerm.length > 2 && !isFilePathSearch) {
       const fuzzySymbols = await this.fuzzySearchSymbols(searchTerm, options);
       // Merge fuzzy results with existing ones, avoiding duplicates
       const existingIds = new Set(symbols.map(s => s.id));
@@ -74,6 +82,19 @@ export class ContextRetriever {
         if (!existingIds.has(fuzzySymbol.id)) {
           symbols.push(fuzzySymbol);
           if (symbols.length >= 20) break; // Limit fuzzy results
+        }
+      }
+    }
+    
+    // Also apply fuzzy matching for files if few results found
+    if (files.length < 3 && searchTerm.length > 2) {
+      const fuzzyFiles = await this.fuzzySearchFiles(searchTerm, options);
+      // Merge fuzzy results with existing ones, avoiding duplicates
+      const existingIds = new Set(files.map(f => f.id));
+      for (const fuzzyFile of fuzzyFiles) {
+        if (!existingIds.has(fuzzyFile.id)) {
+          files.push(fuzzyFile);
+          if (files.length >= 10) break; // Limit fuzzy results
         }
       }
     }
@@ -1446,8 +1467,9 @@ export class ContextRetriever {
   private async fuzzySearchSymbols(searchTerm: string, options: QueryOptions = {}): Promise<SymbolQueryRow[]> {
     const database = this.db.getDatabase();
     
-    // Get all symbols for fuzzy matching
-    let query = `
+    // First try a more lenient SQL search before resorting to loading all symbols
+    const lowerTerm = searchTerm.toLowerCase();
+    let sqlQuery = `
       SELECT 
         s.id,
         s.file_id,
@@ -1459,38 +1481,105 @@ export class ContextRetriever {
         s.documentation,
         s.metadata,
         f.relative_path as filePath,
-        f.language
+        f.language,
+        f.content as fileContent
       FROM symbols s
       JOIN files f ON s.file_id = f.id
+      WHERE 
+        LOWER(s.name) LIKE ? OR
+        LOWER(s.name) LIKE ? OR
+        LOWER(s.name) LIKE ?
     `;
     
+    const sqlParams = [
+      `%${lowerTerm}%`,  // Contains
+      `${lowerTerm}%`,   // Starts with
+      `%${lowerTerm}`    // Ends with
+    ];
+    
     if (options.fileTypes && options.fileTypes.length > 0) {
-      query += ` WHERE f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+      sqlQuery += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+      sqlParams.push(...options.fileTypes);
     }
     
-    const allSymbols = database.prepare(query).all(...(options.fileTypes || [])) as SymbolQueryRow[];
+    sqlQuery += ` ORDER BY 
+      CASE 
+        WHEN LOWER(s.name) = ? THEN 0
+        WHEN LOWER(s.name) LIKE ? THEN 1
+        WHEN LOWER(s.name) LIKE ? THEN 2
+        ELSE 3
+      END,
+      LENGTH(s.name)
+      LIMIT 50`;
     
-    // Configure Fuse for fuzzy matching
-    const fuse = new Fuse(allSymbols, {
-      keys: ['name', 'signature'],
-      threshold: 0.4, // Adjust for typo tolerance (0 = exact, 1 = match anything)
-      includeScore: true,
-      ignoreLocation: true,
-      minMatchCharLength: 2
-    });
+    sqlParams.push(lowerTerm, `${lowerTerm}%`, `%${lowerTerm}%`);
     
-    // Search and return top matches
-    const results = fuse.search(searchTerm);
-    return results.slice(0, 10).map(r => r.item);
+    let candidates = database.prepare(sqlQuery).all(...sqlParams) as SymbolQueryRow[];
+    
+    // If we still have few results, try fuzzy matching on a larger set
+    if (candidates.length < 5) {
+      // Get more symbols for fuzzy matching
+      let query = `
+        SELECT 
+          s.id,
+          s.file_id,
+          s.name,
+          s.type,
+          s.line_start as lineStart,
+          s.line_end as lineEnd,
+          s.signature,
+          s.documentation,
+          s.metadata,
+          f.relative_path as filePath,
+          f.language,
+          f.content as fileContent
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+      `;
+      
+      if (options.fileTypes && options.fileTypes.length > 0) {
+        query += ` WHERE f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+      }
+      
+      query += ` LIMIT 1000`; // Limit to avoid loading entire database
+      
+      const moreSymbols = database.prepare(query).all(...(options.fileTypes || [])) as SymbolQueryRow[];
+      
+      // Configure Fuse for fuzzy matching with better tolerance
+      const fuse = new Fuse(moreSymbols, {
+        keys: [
+          { name: 'name', weight: 0.7 },
+          { name: 'signature', weight: 0.3 }
+        ],
+        threshold: 0.5, // More tolerant for typos
+        includeScore: true,
+        ignoreLocation: true,
+        minMatchCharLength: Math.max(2, searchTerm.length - 2),
+        shouldSort: true
+      });
+      
+      // Search and merge results
+      const fuzzyResults = fuse.search(searchTerm);
+      const existingIds = new Set(candidates.map(c => c.id));
+      
+      for (const result of fuzzyResults) {
+        if (!existingIds.has(result.item.id)) {
+          candidates.push(result.item);
+          if (candidates.length >= 10) break;
+        }
+      }
+    }
+    
+    return candidates.slice(0, 10);
   }
   
   private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
         f.id, f.path, f.relative_path, f.content, 
-        f.language, f.metadata, f.size
+        f.language, f.metadata, f.size, f.last_modified
       FROM files f
-      WHERE f.content LIKE ?
+      WHERE (f.content LIKE ? OR f.relative_path LIKE ?)
     `;
     
     if (options.fileTypes && options.fileTypes.length > 0) {
@@ -1504,7 +1593,7 @@ export class ContextRetriever {
   private buildSymbolLikeQuery(_searchTerm: string, options: QueryOptions): string {
     let query = `
       SELECT 
-        s.*, f.relative_path as filePath, f.language
+        s.*, f.relative_path as filePath, f.language, f.content as fileContent
       FROM symbols s
       JOIN files f ON s.file_id = f.id
       WHERE (s.name LIKE ? OR s.signature LIKE ?)
@@ -1516,5 +1605,104 @@ export class ContextRetriever {
     
     query += ' ORDER BY s.name LIMIT 100';
     return query;
+  }
+  
+  private looksLikeFilePath(searchTerm: string): boolean {
+    // Check if the search term looks like a file path
+    return searchTerm.includes('/') || 
+           searchTerm.includes('\\') || 
+           searchTerm.includes('.') && 
+           (searchTerm.endsWith('.py') || searchTerm.endsWith('.js') || 
+            searchTerm.endsWith('.ts') || searchTerm.endsWith('.tsx') ||
+            searchTerm.endsWith('.jsx') || searchTerm.endsWith('.java') ||
+            searchTerm.endsWith('.go') || searchTerm.endsWith('.rs') ||
+            searchTerm.endsWith('.cpp') || searchTerm.endsWith('.c') ||
+            searchTerm.endsWith('.h') || searchTerm.endsWith('.hpp') ||
+            searchTerm.endsWith('.cs') || searchTerm.endsWith('.rb') ||
+            searchTerm.endsWith('.php') || searchTerm.endsWith('.swift'));
+  }
+  
+  private async searchByFilePath(searchTerm: string, options: QueryOptions): Promise<FileQueryRow[]> {
+    const database = this.db.getDatabase();
+    
+    // Normalize the search term (remove leading ./ or trailing extensions sometimes)
+    const normalizedPath = searchTerm.replace(/^\.[\/\\]/, '').replace(/\\/, '/');
+    
+    // Try exact match first
+    let query = `
+      SELECT 
+        f.id, f.path, f.relative_path, f.content, 
+        f.language, f.metadata, f.size, f.last_modified
+      FROM files f
+      WHERE f.relative_path = ? OR f.path = ?
+    `;
+    
+    let files = database.prepare(query).all(normalizedPath, normalizedPath) as FileQueryRow[];
+    
+    // If no exact match, try partial matches
+    if (files.length === 0) {
+      query = `
+        SELECT 
+          f.id, f.path, f.relative_path, f.content, 
+          f.language, f.metadata, f.size, f.last_modified
+        FROM files f
+        WHERE f.relative_path LIKE ? OR f.path LIKE ?
+        ORDER BY 
+          CASE 
+            WHEN f.relative_path LIKE ? THEN 0
+            WHEN f.relative_path LIKE ? THEN 1
+            ELSE 2
+          END,
+          LENGTH(f.relative_path)
+        LIMIT 20
+      `;
+      
+      const searchPattern = `%${normalizedPath}%`;
+      const endsWithPattern = `%${normalizedPath}`;
+      const startsWithPattern = `${normalizedPath}%`;
+      
+      files = database.prepare(query).all(
+        searchPattern, searchPattern,
+        endsWithPattern, startsWithPattern
+      ) as FileQueryRow[];
+    }
+    
+    // Apply file type filters if specified
+    if (options.fileTypes && options.fileTypes.length > 0) {
+      files = files.filter(f => f.language && options.fileTypes!.includes(f.language));
+    }
+    
+    return files;
+  }
+  
+  private async fuzzySearchFiles(searchTerm: string, options: QueryOptions = {}): Promise<FileQueryRow[]> {
+    const database = this.db.getDatabase();
+    
+    // Get all files for fuzzy matching
+    let query = `
+      SELECT 
+        f.id, f.path, f.relative_path, f.content,
+        f.language, f.metadata, f.size, f.last_modified
+      FROM files f
+    `;
+    
+    if (options.fileTypes && options.fileTypes.length > 0) {
+      query += ` WHERE f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
+    }
+    
+    const allFiles = database.prepare(query).all(...(options.fileTypes || [])) as FileQueryRow[];
+    
+    // Configure Fuse for fuzzy matching on file paths
+    const fuse = new Fuse(allFiles, {
+      keys: ['relative_path', 'path'],
+      threshold: 0.4, // Adjust for typo tolerance
+      includeScore: true,
+      ignoreLocation: true,
+      minMatchCharLength: 2
+    });
+    
+    // Search and return top matches
+    const results = fuse.search(searchTerm);
+    return results.slice(0, 10).map(r => r.item);
   }
 }

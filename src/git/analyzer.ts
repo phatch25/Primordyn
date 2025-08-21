@@ -48,10 +48,16 @@ export class GitAnalyzer {
       // Get file changes
       const fileChanges = this.getFileChanges(filePath);
       
-      // Get blame information if we have line numbers
+      // Get blame information if we have line numbers OR try to find symbol in file
       let blame: GitBlame[] = [];
       if (lineStart && lineEnd) {
         blame = this.getBlameForLines(filePath, lineStart, lineEnd);
+      } else if (symbolName) {
+        // Try to find the symbol in the file and get blame for those lines
+        const lineInfo = this.findSymbolLines(filePath, symbolName);
+        if (lineInfo) {
+          blame = this.getBlameForLines(filePath, lineInfo.start, lineInfo.end);
+        }
       }
       
       // Calculate statistics
@@ -307,6 +313,75 @@ export class GitAnalyzer {
       .sort((a, b) => b.commits.length - a.commits.length);
   }
 
+  private findSymbolLines(filePath: string, symbolName: string): { start: number; end: number } | null {
+    try {
+      // Read the file content
+      const fs = require('fs');
+      const path = require('path');
+      const fullPath = path.join(this.projectRoot, filePath);
+      
+      if (!fs.existsSync(fullPath)) {
+        return null;
+      }
+      
+      const content = fs.readFileSync(fullPath, 'utf8');
+      const lines = content.split('\n');
+      
+      // Search for the symbol definition
+      let startLine = -1;
+      let endLine = -1;
+      let depth = 0;
+      let foundSymbol = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Look for various patterns that might indicate the symbol definition
+        if (!foundSymbol && (
+          line.includes(`function ${symbolName}`) ||
+          line.includes(`class ${symbolName}`) ||
+          line.includes(`interface ${symbolName}`) ||
+          line.includes(`const ${symbolName}`) ||
+          line.includes(`let ${symbolName}`) ||
+          line.includes(`var ${symbolName}`) ||
+          line.includes(`def ${symbolName}`) ||
+          line.includes(`type ${symbolName}`) ||
+          line.includes(`struct ${symbolName}`) ||
+          line.includes(`enum ${symbolName}`)
+        )) {
+          startLine = i + 1; // Convert to 1-based line numbers
+          foundSymbol = true;
+        }
+        
+        // Track braces to find the end of the symbol
+        if (foundSymbol) {
+          if (line.includes('{')) depth++;
+          if (line.includes('}')) {
+            depth--;
+            if (depth === 0) {
+              endLine = i + 1; // Convert to 1-based line numbers
+              break;
+            }
+          }
+          // For single-line definitions or languages without braces
+          if (depth === 0 && (line.trim() === '' || i === lines.length - 1)) {
+            endLine = i + 1;
+            break;
+          }
+        }
+      }
+      
+      // If we found the start but not the end, use a reasonable range
+      if (startLine > 0 && endLine === -1) {
+        endLine = Math.min(startLine + 20, lines.length);
+      }
+      
+      return startLine > 0 ? { start: startLine, end: endLine } : null;
+    } catch {
+      return null;
+    }
+  }
+  
   public getLastCommitForLine(filePath: string, lineNumber: number): GitCommit | null {
     try {
       const output = this.execGit(`blame -L ${lineNumber},${lineNumber} --line-porcelain "${filePath}"`);
