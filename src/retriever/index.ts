@@ -78,8 +78,12 @@ export class ContextRetriever {
       }
     }
 
+    // Sort and prioritize results for better relevance
+    const prioritizedFiles = this.prioritizeResults(files, searchTerm);
+    const prioritizedSymbols = this.prioritizeSymbolResults(symbols, searchTerm);
+    
     // Process results with token limit
-    for (const file of files) {
+    for (const file of prioritizedFiles) {
       const fileResult = await this.processFileResult(file, options);
       const fileTokens = this.estimateTokens(fileResult);
 
@@ -92,7 +96,7 @@ export class ContextRetriever {
       result.totalTokens += fileTokens;
     }
 
-    for (const symbol of symbols) {
+    for (const symbol of prioritizedSymbols) {
       const symbolResult = this.processSymbolResult(symbol);
       const symbolTokens = this.estimateTokens(symbolResult);
 
@@ -596,7 +600,8 @@ export class ContextRetriever {
     };
 
     if (options.includeContent) {
-      result.content = file.content;
+      // Smart content extraction: prioritize relevant sections
+      result.content = this.extractRelevantContent(file.content, options);
     } else {
       // Include a preview (first 10 lines)
       const lines = file.content.split('\n').slice(0, 10);
@@ -655,6 +660,114 @@ export class ContextRetriever {
     } catch {
       return Math.ceil(text.length / 4);
     }
+  }
+  
+  private extractRelevantContent(content: string, options: QueryOptions): string {
+    const lines = content.split('\n');
+    const maxLines = 200; // Reasonable limit for context
+    
+    // If content is small enough, return it all
+    if (lines.length <= maxLines) {
+      return content;
+    }
+    
+    // For larger files, extract most relevant sections
+    const relevantSections: string[] = [];
+    let currentSection: string[] = [];
+    let inRelevantSection = false;
+    let linesIncluded = 0;
+    
+    // Priority patterns to identify important sections
+    const importantPatterns = [
+      /^(export|import|class|interface|function|const|let|var|type|enum)/,
+      /^(def|class|import|from)/,  // Python
+      /^(func|type|struct|interface|package)/,  // Go
+      /^(public|private|protected|class|interface)/,  // Java
+    ];
+    
+    for (let i = 0; i < lines.length && linesIncluded < maxLines; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      
+      // Check if this line starts an important section
+      const isImportant = importantPatterns.some(pattern => pattern.test(trimmed));
+      
+      if (isImportant && !inRelevantSection) {
+        // Start a new relevant section
+        inRelevantSection = true;
+        currentSection = [line];
+        linesIncluded++;
+      } else if (inRelevantSection) {
+        currentSection.push(line);
+        linesIncluded++;
+        
+        // End section on empty line or after reasonable size
+        if ((trimmed === '' && currentSection.length > 5) || currentSection.length > 30) {
+          relevantSections.push(currentSection.join('\n'));
+          currentSection = [];
+          inRelevantSection = false;
+        }
+      }
+    }
+    
+    // Add any remaining section
+    if (currentSection.length > 0) {
+      relevantSections.push(currentSection.join('\n'));
+    }
+    
+    // If we didn't find enough relevant sections, add file beginning
+    if (relevantSections.length === 0 || linesIncluded < 50) {
+      relevantSections.unshift(lines.slice(0, Math.min(50, maxLines - linesIncluded)).join('\n'));
+    }
+    
+    return relevantSections.join('\n\n// ...\n\n');
+  }
+  
+  private prioritizeResults(files: FileQueryRow[], searchTerm: string): FileQueryRow[] {
+    return files.sort((a, b) => {
+      // Prioritize exact matches in path
+      const aPathMatch = a.relativePath?.toLowerCase().includes(searchTerm.toLowerCase()) ? 1 : 0;
+      const bPathMatch = b.relativePath?.toLowerCase().includes(searchTerm.toLowerCase()) ? 1 : 0;
+      if (aPathMatch !== bPathMatch) return bPathMatch - aPathMatch;
+      
+      // Then prioritize by relevance (more occurrences of search term)
+      const aOccurrences = (a.content.match(new RegExp(searchTerm, 'gi')) || []).length;
+      const bOccurrences = (b.content.match(new RegExp(searchTerm, 'gi')) || []).length;
+      if (aOccurrences !== bOccurrences) return bOccurrences - aOccurrences;
+      
+      // Finally, prefer smaller files (more focused)
+      return (a.size || 0) - (b.size || 0);
+    });
+  }
+  
+  private prioritizeSymbolResults(symbols: SymbolQueryRow[], searchTerm: string): SymbolQueryRow[] {
+    return symbols.sort((a, b) => {
+      // Prioritize exact name matches
+      const aExact = a.name.toLowerCase() === searchTerm.toLowerCase() ? 1 : 0;
+      const bExact = b.name.toLowerCase() === searchTerm.toLowerCase() ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+      
+      // Then prioritize starts-with matches
+      const aStartsWith = a.name.toLowerCase().startsWith(searchTerm.toLowerCase()) ? 1 : 0;
+      const bStartsWith = b.name.toLowerCase().startsWith(searchTerm.toLowerCase()) ? 1 : 0;
+      if (aStartsWith !== bStartsWith) return bStartsWith - aStartsWith;
+      
+      // Prefer certain symbol types (interfaces, classes, functions over others)
+      const typeOrder: Record<string, number> = {
+        'interface': 5,
+        'class': 4,
+        'function': 3,
+        'type': 2,
+        'method': 1,
+        'variable': 0
+      };
+      const aTypeScore = typeOrder[a.type] || 0;
+      const bTypeScore = typeOrder[b.type] || 0;
+      if (aTypeScore !== bTypeScore) return bTypeScore - aTypeScore;
+      
+      // Finally, sort by name length (shorter = more likely to be what user wants)
+      return a.name.length - b.name.length;
+    });
   }
 
   public async getDependencyGraphWithDepth(symbolName: string, depth: number = 1): Promise<DependencyGraph | null> {

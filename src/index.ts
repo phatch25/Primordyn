@@ -7,7 +7,12 @@ async function main() {
   try {
     const program = createCLI();
     await program.parseAsync(process.argv);
-  } catch (error) {
+  } catch (error: any) {
+    // Commander throws an error for help/version, but we handle it in exitOverride
+    if (error.code === 'commander.help' || error.code === 'commander.helpDisplayed' || error.code === 'commander.version') {
+      // Already handled in exitOverride
+      return;
+    }
     console.error(chalk.red('❌ Unexpected error:'), error instanceof Error ? error.message : error);
     process.exit(1);
   }

@@ -13,10 +13,15 @@ Primordyn indexes your codebase and provides intelligent context retrieval optim
 ## Features
 
 - **Smart Symbol Resolution** - Find any function, class, or type with full context
+- **Fuzzy Search** - Typo-tolerant search that finds what you meant
+- **Symbol Type Filtering** - Search for specific types (classes, interfaces, functions)
 - **Usage Tracking** - See where symbols are defined and used
+- **Git Integration** - View blame, history, and recent changes
+- **Impact Analysis** - Understand refactoring risks before making changes
 - **Precise Locations** - File:line references for easy navigation
 - **AI-Optimized Output** - Clean markdown format for LLM consumption
 - **Fast Search** - SQLite FTS5 for instant results
+- **Smart Context Selection** - Intelligent content extraction to minimize truncation
 - **Token-Aware** - Respects context limits with smart prioritization
 
 ## Installation
@@ -63,26 +68,40 @@ primordyn query "DatabaseConnection"
 # Show what calls it and what it calls
 primordyn query "processFile" --show-graph
 
+# Search for specific symbol types
+primordyn query "Database" --type class
+primordyn query "Config" --type interface
+
 # Include all usage locations
 primordyn query "Config" --include-callers
 
 # Get impact analysis for refactoring
 primordyn query "OldAPI" --impact
 
+# View git history and blame
+primordyn query "buggyFunction" --blame --recent 14
+
 # Output as JSON for tooling
 primordyn query "Parser" --format json
 
 # Limit token count for AI context windows
 primordyn query "complexFunction" --tokens 4000
+
+# Fuzzy search handles typos automatically
+primordyn query "databse"  # Will find "database"
 ```
 
 **Options:**
 - `--tokens <max>` - Maximum tokens in response (default: 8000)
 - `--format <type>` - Output format: `ai`, `json`, `human` (default: ai)
+- `--type <symbol-type>` - Filter by symbol type (e.g., class, interface, function)
 - `--show-graph` - Show dependency relationships
 - `--include-callers` - Include all files that use this symbol
 - `--impact` - Show refactoring impact analysis
 - `--languages <langs>` - Filter by language (e.g., typescript,python)
+- `--blame` - Show git blame information
+- `--recent <days>` - Show commits from last N days (default: 7)
+- `--depth <n>` - Depth of context expansion (default: 1)
 
 ### `primordyn stats`
 
