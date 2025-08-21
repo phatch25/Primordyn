@@ -345,7 +345,7 @@ export class ContextRetriever {
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
         ORDER BY 
           bm25(symbols_fts),
-          CASE WHEN s.name = ? THEN 0 ELSE 1 END,
+          CASE WHEN LOWER(s.name) = LOWER(?) THEN 0 ELSE 1 END,
           LENGTH(s.name)
         LIMIT 20
       `;
@@ -370,11 +370,11 @@ export class ContextRetriever {
           f.content as fileContent
         FROM symbols s
         JOIN files f ON s.file_id = f.id
-        WHERE s.name LIKE ?
+        WHERE LOWER(s.name) LIKE LOWER(?)
         ${options.symbolType ? `AND s.type = '${options.symbolType}'` : ''}
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(() => '?').join(',')})` : ''}
         ORDER BY 
-          CASE WHEN s.name = ? THEN 0 ELSE 1 END,
+          CASE WHEN LOWER(s.name) = LOWER(?) THEN 0 ELSE 1 END,
           LENGTH(s.name)
         LIMIT 20
       `;
@@ -803,7 +803,7 @@ export class ContextRetriever {
         f.relative_path as filePath
       FROM symbols s
       JOIN files f ON s.file_id = f.id
-      WHERE s.name = ?
+      WHERE LOWER(s.name) = LOWER(?)
       LIMIT 1
     `).get(symbolName) as SymbolLookupResult | undefined;
     
@@ -913,7 +913,7 @@ export class ContextRetriever {
         SELECT DISTINCT cg.callee_name
         FROM call_graph cg
         JOIN symbols s ON cg.caller_symbol_id = s.id
-        WHERE s.name = ?
+        WHERE LOWER(s.name) = LOWER(?)
       `).all(name) as { callee_name: string }[];
       
       if (calls.length > 0) {
@@ -954,7 +954,7 @@ export class ContextRetriever {
         f.relative_path as filePath
       FROM symbols s
       JOIN files f ON s.file_id = f.id
-      WHERE s.name = ?
+      WHERE LOWER(s.name) = LOWER(?)
       LIMIT 1
     `).get(symbolName) as SymbolLookupResult | undefined;
     
@@ -1281,7 +1281,7 @@ export class ContextRetriever {
         f.relative_path as filePath
       FROM symbols s
       JOIN files f ON s.file_id = f.id
-      WHERE s.name = ?
+      WHERE LOWER(s.name) = LOWER(?)
       LIMIT 1
     `).get(symbolName) as SymbolLookupResult | undefined;
     
@@ -1310,6 +1310,39 @@ export class ContextRetriever {
   
   public async getRecentChanges(days: number = 7): Promise<RecentFileChanges[]> {
     return this.gitAnalyzer.getRecentChanges(days);
+  }
+  
+  public async getFuzzySuggestions(searchTerm: string, limit: number = 5): Promise<string[]> {
+    const database = this.db.getDatabase();
+    
+    // Get suggestions from symbols using Levenshtein-like fuzzy matching
+    const suggestions = database.prepare(`
+      SELECT DISTINCT name
+      FROM symbols
+      WHERE LOWER(name) LIKE LOWER(?)
+         OR LOWER(name) LIKE LOWER(?)
+         OR LOWER(name) LIKE LOWER(?)
+      ORDER BY 
+        CASE 
+          WHEN LOWER(name) = LOWER(?) THEN 0
+          WHEN LOWER(name) LIKE LOWER(?) THEN 1
+          WHEN LOWER(name) LIKE LOWER(?) THEN 2
+          ELSE 3
+        END,
+        LENGTH(name) - LENGTH(?) ASC
+      LIMIT ?
+    `).all(
+      `%${searchTerm}%`,  // Contains
+      `${searchTerm}%`,   // Starts with
+      `%${searchTerm}`,   // Ends with
+      searchTerm,         // Exact match
+      `${searchTerm}%`,   // Starts with (for ordering)
+      `%${searchTerm}%`,  // Contains (for ordering)
+      searchTerm,         // For length difference calculation
+      limit
+    ) as { name: string }[];
+    
+    return suggestions.map(s => s.name);
   }
 
   public async getContextSummary(): Promise<string> {

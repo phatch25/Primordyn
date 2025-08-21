@@ -28,6 +28,7 @@ export class Indexer {
 
     const stats: IndexStats = {
       filesIndexed: 0,
+      filesSkipped: 0,
       symbolsExtracted: 0,
       totalTokens: 0,
       timeElapsed: 0,
@@ -65,9 +66,10 @@ export class Indexer {
       stats.timeElapsed = Date.now() - startTime;
 
       if (spinner) {
-        spinner.succeed(
-          chalk.green(`✓ Indexed ${stats.filesIndexed} files with ${stats.symbolsExtracted} symbols (${stats.totalTokens} tokens) in ${(stats.timeElapsed / 1000).toFixed(2)}s`)
-        );
+        const message = (stats.filesSkipped || 0) > 0 
+          ? chalk.green(`✓ Indexed ${stats.filesIndexed} files (${stats.filesSkipped} unchanged) with ${stats.symbolsExtracted} symbols (${stats.totalTokens} tokens) in ${(stats.timeElapsed / 1000).toFixed(2)}s`)
+          : chalk.green(`✓ Indexed ${stats.filesIndexed} files with ${stats.symbolsExtracted} symbols (${stats.totalTokens} tokens) in ${(stats.timeElapsed / 1000).toFixed(2)}s`);
+        spinner.succeed(message);
       }
 
       if (stats.errors > 0 && spinner) {
@@ -93,6 +95,7 @@ export class Indexer {
 
       if (existing && existing.hash === fileInfo.hash && !options.updateExisting) {
         // File hasn't changed, skip
+        stats.filesSkipped = (stats.filesSkipped || 0) + 1;
         return;
       }
 

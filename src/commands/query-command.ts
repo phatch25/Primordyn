@@ -8,7 +8,7 @@ import chalk from 'chalk';
 export const queryCommand = new Command('query')
   .description('Smart context retrieval for AI agents')
   .argument('<search-term>', 'Symbol, function, class, or search query')
-  .option('--tokens <max>', 'Maximum tokens in response (default: 8000)', '8000')
+  .option('--tokens <max>', 'Maximum tokens in response (default: 16000)', '16000')
   .option('--format <type>', 'Output format: ai, json, human (default: ai)', 'ai')
   .option('--depth <n>', 'Depth of context expansion (default: 1)', '1')
   .option('--include-tests', 'Include related test files')
@@ -92,18 +92,27 @@ export const queryCommand = new Command('query')
         truncated: searchResult.truncated
       };
       
+      // If no results found, try to get fuzzy suggestions
+      let suggestions: string[] = [];
+      if (!result.primarySymbol && result.files.length === 0) {
+        suggestions = await retriever.getFuzzySuggestions(validatedSearchTerm, 5);
+      }
+      
       // Handle different output formats
       switch (format) {
         case 'json':
-          console.log(JSON.stringify(result, null, 2));
+          const jsonOutput = suggestions.length > 0 
+            ? { ...result, suggestions }
+            : result;
+          console.log(JSON.stringify(jsonOutput, null, 2));
           break;
           
         case 'ai':
-          outputAIFormat(validatedSearchTerm, result, options);
+          outputAIFormat(validatedSearchTerm, result, options, suggestions);
           break;
           
         default:
-          outputHumanFormat(validatedSearchTerm, result, options);
+          outputHumanFormat(validatedSearchTerm, result, options, suggestions);
       }
       
       db.close();
@@ -118,8 +127,16 @@ export const queryCommand = new Command('query')
     }
   });
 
-function outputAIFormat(searchTerm: string, result: QueryCommandResult, options: QueryCommandOptions) {
+function outputAIFormat(searchTerm: string, result: QueryCommandResult, options: QueryCommandOptions, suggestions?: string[]) {
   console.log(`# Context for: ${searchTerm}\n`);
+  
+  // If no results but have suggestions
+  if (!result.primarySymbol && result.files.length === 0 && suggestions && suggestions.length > 0) {
+    console.log(`No exact matches found. Did you mean one of these?\n`);
+    suggestions.forEach(s => console.log(`  • ${s}`));
+    console.log(`\nTry: primordyn query "${suggestions[0]}"\n`);
+    return;
+  }
   
   // Primary symbol if found
   if (result.primarySymbol) {
@@ -350,15 +367,24 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
   }
 }
 
-function outputHumanFormat(searchTerm: string, result: QueryCommandResult, _options: QueryCommandOptions) {
+function outputHumanFormat(searchTerm: string, result: QueryCommandResult, _options: QueryCommandOptions, suggestions?: string[]) {
   console.log(chalk.blue(`🔍 Context for: "${searchTerm}"`));
   console.log(chalk.gray('━'.repeat(60)));
   
   if (!result.primarySymbol && result.files.length === 0) {
     console.log(chalk.yellow('No results found.'));
-    console.log('\n' + chalk.blue('💡 Try:'));
-    console.log('  • Different search terms');
-    console.log('  • Check indexed files:', chalk.cyan('primordyn stats'));
+    
+    if (suggestions && suggestions.length > 0) {
+      console.log('\n' + chalk.green('💡 Did you mean:'));
+      suggestions.forEach(s => {
+        console.log(chalk.cyan(`  • ${s}`));
+      });
+      console.log('\n' + chalk.gray(`Try: primordyn query "${suggestions[0]}"`));
+    } else {
+      console.log('\n' + chalk.blue('💡 Try:'));
+      console.log('  • Different search terms');
+      console.log('  • Check indexed files:', chalk.cyan('primordyn stats'));
+    }
     return;
   }
   

@@ -41,18 +41,39 @@ export function validateLanguages(value: string): string[] {
     throw new ValidationError('No languages specified');
   }
   
+  // Language aliases mapping
+  const languageAliases: Record<string, string> = {
+    'ts': 'typescript',
+    'tsx': 'typescript',
+    'js': 'javascript',
+    'jsx': 'javascript',
+    'py': 'python',
+    'rs': 'rust',
+    'rb': 'ruby',
+    'cs': 'csharp',
+    'kt': 'kotlin',
+    'md': 'markdown',
+    'yml': 'yaml'
+  };
+  
   const validLanguages = [
     'typescript', 'javascript', 'python', 'go', 'rust', 'java', 
     'c', 'cpp', 'csharp', 'ruby', 'php', 'swift', 'kotlin',
     'markdown', 'json', 'yaml', 'toml', 'xml', 'html', 'css'
   ];
   
-  const invalid = languages.filter(l => !validLanguages.includes(l));
+  // Map aliases to full names
+  const normalizedLanguages = languages.map(lang => {
+    const normalized = languageAliases[lang.toLowerCase()] || lang.toLowerCase();
+    return normalized;
+  });
+  
+  const invalid = normalizedLanguages.filter(l => !validLanguages.includes(l));
   if (invalid.length > 0) {
     console.warn(chalk.yellow(`⚠️  Unknown languages: ${invalid.join(', ')}`));
   }
   
-  return languages;
+  return normalizedLanguages;
 }
 
 export function validateDays(value: string): number {

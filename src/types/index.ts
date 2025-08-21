@@ -53,6 +53,7 @@ export interface IndexOptions extends Partial<ScanOptions> {
 
 export interface IndexStats {
   filesIndexed: number;
+  filesSkipped?: number;
   symbolsExtracted: number;
   totalTokens: number;
   timeElapsed: number;
