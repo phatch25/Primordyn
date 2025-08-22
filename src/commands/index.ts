@@ -18,7 +18,31 @@ export function createCLI(): Command {
     .configureHelp({
       sortSubcommands: true,
       subcommandTerm: (cmd) => cmd.name() + ' ' + cmd.usage(),
-    });
+    })
+    .addHelpText('after', `
+${chalk.bold('Examples:')}
+  ${chalk.gray('# Initial setup')}
+  $ primordyn index                     ${chalk.gray('# Index current directory')}
+  $ primordyn stats                     ${chalk.gray('# View index statistics')}
+
+  ${chalk.gray('# Discovery workflow')}
+  $ primordyn list "user"               ${chalk.gray('# Search for items containing "user"')}
+  $ primordyn list --type class         ${chalk.gray('# List all classes')}
+  $ primordyn list --languages ts,js    ${chalk.gray('# List TypeScript/JavaScript items')}
+
+  ${chalk.gray('# Targeted retrieval')}
+  $ primordyn query UserService         ${chalk.gray('# Get detailed context for UserService')}
+  $ primordyn query src/auth/login.ts   ${chalk.gray('# Get context for specific file')}
+
+  ${chalk.gray('# Advanced usage')}
+  $ primordyn query UserService --show-graph     ${chalk.gray('# Show dependencies')}
+  $ primordyn query UserService --impact         ${chalk.gray('# Show impact analysis')}
+  $ primordyn endpoints                          ${chalk.gray('# List all API endpoints')}
+
+${chalk.bold('Workflow:')}
+  1. Use ${chalk.cyan('list')} to discover and search (fuzzy matching, patterns)
+  2. Use ${chalk.cyan('query')} to get detailed context (exact retrieval)
+`);
 
   // Add essential AI-focused commands
   program.addCommand(indexCommand);

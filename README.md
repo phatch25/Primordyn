@@ -66,6 +66,24 @@ primordyn query "api" --use-alias
 PRIMORDYN_VERBOSE=true primordyn query "MyClass"
 ```
 
+## Workflow
+
+The recommended workflow separates discovery from retrieval:
+
+1. **Discovery**: Use `list` to search and explore the codebase
+2. **Retrieval**: Use `query` to get detailed context for specific items
+
+```bash
+# Step 1: Discover what's available
+primordyn list "auth"              # Search for auth-related items
+primordyn list --type class        # List all classes
+primordyn list --show-files         # Browse files
+
+# Step 2: Get detailed context
+primordyn query AuthService         # Get full context for AuthService
+primordyn query AuthService --impact # Analyze refactoring impact
+```
+
 ## Commands
 
 ### `primordyn index [path]`
@@ -77,9 +95,23 @@ primordyn index                    # Index current directory
 primordyn index /path/to/project   # Index specific path
 ```
 
-### `primordyn query <search-term>`
+### `primordyn list [search-pattern]`
 
-Search for symbols, functions, classes, and their relationships.
+List and search symbols, files, and patterns across the codebase.
+
+```bash
+# Browse and search
+primordyn list                     # List all symbols
+primordyn list "user"               # Search for "user" (fuzzy matching)
+primordyn list --type function      # List all functions
+primordyn list --languages ts,js    # Filter by language
+primordyn list --show-files          # Include file listings
+primordyn list --detailed            # Show detailed information
+```
+
+### `primordyn query <target>`
+
+Get detailed context for a specific symbol or file (exact match).
 
 ```bash
 # Basic search

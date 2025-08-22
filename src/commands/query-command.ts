@@ -20,6 +20,19 @@ export const queryCommand = new Command('query')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
   .option('--refresh', 'Force refresh of index before query')
+  .addHelpText('after', `
+Examples:
+  $ primordyn query UserService          # Get detailed context for UserService
+  $ primordyn query "Database.connect"   # Query specific method
+  $ primordyn query src/auth/login.ts    # Get context for a file
+  
+  $ primordyn query UserService --show-graph      # Show dependency graph
+  $ primordyn query UserService --impact          # Show impact analysis
+  $ primordyn query UserService --include-callers # Include usage locations
+  $ primordyn query UserService --recent 7        # Show recent changes
+  
+Note: Use 'list' command first to discover available symbols
+`)
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs
