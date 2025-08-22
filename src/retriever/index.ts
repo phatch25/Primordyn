@@ -1,6 +1,7 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import { GitAnalyzer } from '../git/analyzer.js';
+import { LRUCache } from '../utils/lru-cache.js';
 import Fuse from 'fuse.js';
 import type { 
   QueryOptions, QueryResult, FileResult, SymbolResult, 
@@ -14,15 +15,32 @@ export class ContextRetriever {
   private db: PrimordynDB;
   private tokenEncoder: Tiktoken;
   private gitAnalyzer: GitAnalyzer;
+  private queryCache: LRUCache<QueryResult>;
+  private symbolCache: LRUCache<SymbolResult[]>;
+  private fileCache: LRUCache<FileResult>;
 
   constructor(db: PrimordynDB) {
     this.db = db;
     // Use GPT-4 encoder as it's similar to Claude's tokenization
     this.tokenEncoder = encodingForModel('gpt-4');
     this.gitAnalyzer = new GitAnalyzer();
+    
+    // Initialize caches with 30 second TTL
+    this.queryCache = new LRUCache<QueryResult>(100, 30);
+    this.symbolCache = new LRUCache<SymbolResult[]>(200, 30);
+    this.fileCache = new LRUCache<FileResult>(100, 30);
   }
 
   public async query(searchTerm: string, options: QueryOptions = {}): Promise<QueryResult> {
+    // Generate cache key
+    const cacheKey = `query:${searchTerm}:${JSON.stringify(options)}`;
+    
+    // Check cache first
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
     const maxTokens = options.maxTokens || 4000;
     const database = this.db.getDatabase();
 
@@ -163,6 +181,9 @@ export class ContextRetriever {
       result.totalTokens += symbolTokens;
     }
 
+    // Cache the result before returning
+    this.queryCache.set(cacheKey, result);
+    
     return result;
   }
 
@@ -371,6 +392,13 @@ export class ContextRetriever {
   }
   
   public async findSymbol(symbolName: string, options: QueryOptions = {}): Promise<SymbolResult[]> {
+    // Check cache first
+    const cacheKey = `symbol:${symbolName}:${JSON.stringify(options)}`;
+    const cached = this.symbolCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
     const database = this.db.getDatabase();
 
     // Check if we can use FTS5 or need to fall back to LIKE
@@ -441,7 +469,12 @@ export class ContextRetriever {
       symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
     }
 
-    return symbols.map(symbol => this.processSymbolResult(symbol));
+    const results = symbols.map(symbol => this.processSymbolResult(symbol));
+    
+    // Cache the results
+    this.symbolCache.set(cacheKey, results);
+    
+    return results;
   }
 
   public async searchFullText(query: string, options: QueryOptions = {}): Promise<QueryResult> {
@@ -716,6 +749,17 @@ export class ContextRetriever {
   }
 
   private estimateTokens(data: unknown): number {
+    // Quick estimation without encoding for performance
+    // Only do actual encoding if absolutely necessary
+    const text = typeof data === 'string' ? data : JSON.stringify(data);
+    
+    // Use fast approximation: ~4 characters per token for English text
+    // This is accurate enough for limiting purposes
+    return Math.ceil(text.length / 4);
+  }
+  
+  private accurateTokenCount(data: unknown): number {
+    // Use this only when exact count is needed
     const text = JSON.stringify(data);
     try {
       return this.tokenEncoder.encode(text).length;

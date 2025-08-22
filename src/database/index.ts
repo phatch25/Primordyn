@@ -23,6 +23,13 @@ export class PrimordynDB {
     // Enable foreign keys
     this.db.pragma('foreign_keys = ON');
     
+    // Performance optimizations
+    this.db.pragma('journal_mode = WAL'); // Write-Ahead Logging for better concurrency
+    this.db.pragma('synchronous = NORMAL'); // Faster writes, still safe
+    this.db.pragma('cache_size = -64000'); // 64MB cache
+    this.db.pragma('temp_store = MEMORY'); // Use memory for temp tables
+    this.db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
+    
     // Create tables
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS files (
@@ -82,8 +89,10 @@ export class PrimordynDB {
       CREATE INDEX IF NOT EXISTS idx_files_language ON files(language);
       CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
       CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+      CREATE INDEX IF NOT EXISTS idx_symbols_name_lower ON symbols(LOWER(name)); -- Case-insensitive search
       CREATE INDEX IF NOT EXISTS idx_symbols_type ON symbols(type);
       CREATE INDEX IF NOT EXISTS idx_symbols_file_id ON symbols(file_id);
+      CREATE INDEX IF NOT EXISTS idx_symbols_composite ON symbols(file_id, type, name); -- Composite for complex queries
       CREATE INDEX IF NOT EXISTS idx_context_cache_query_hash ON context_cache(query_hash);
       CREATE INDEX IF NOT EXISTS idx_context_cache_expires_at ON context_cache(expires_at);
       

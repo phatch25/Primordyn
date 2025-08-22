@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
+import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { ContextRetriever } from '../retriever/index.js';
 import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
 import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
@@ -32,7 +33,7 @@ export const queryCommand = new Command('query')
       const days = options.recent ? validateDays(options.recent) : undefined;
       const symbolType = options.type;
       
-      const db = new PrimordynDB();
+      const db = DatabaseConnectionPool.getConnection();
       
       // Expand search term using aliases
       const aliasManager = new AliasManager(process.cwd());
@@ -175,7 +176,7 @@ export const queryCommand = new Command('query')
           outputHumanFormat(validatedSearchTerm, result, options, suggestions);
       }
       
-      db.close();
+      // Don't close - let connection pool manage it
       
     } catch (error) {
       if (error instanceof ValidationError) {
