@@ -1451,6 +1451,105 @@ export class ContextRetriever {
     return suggestions.map(s => s.name);
   }
 
+  public async listAllSymbols(options: {
+    fileTypes?: string[];
+    symbolType?: string;
+    limit?: number;
+  } = {}): Promise<SymbolResult[]> {
+    const database = this.db.getDatabase();
+    const limit = options.limit || 100;
+    
+    let whereConditions: string[] = [];
+    const params: any[] = [];
+    
+    if (options.fileTypes?.length) {
+      const placeholders = options.fileTypes.map(() => '?').join(',');
+      whereConditions.push(`f.language IN (${placeholders})`);
+      params.push(...options.fileTypes);
+    }
+    
+    if (options.symbolType) {
+      whereConditions.push(`s.type = ?`);
+      params.push(options.symbolType);
+    }
+    
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+    
+    const query = `
+      SELECT 
+        s.id,
+        s.name,
+        s.type,
+        s.signature,
+        s.file_id,
+        s.line_start as lineStart,
+        s.line_end as lineEnd,
+        f.relative_path as filePath
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      ${whereClause}
+      ORDER BY s.type, s.name
+      LIMIT ?
+    `;
+    
+    params.push(limit);
+    const results = database.prepare(query).all(...params) as SymbolQueryRow[];
+    
+    return results.map(symbol => this.processSymbolResult(symbol));
+  }
+
+  public async listAllFiles(options: {
+    fileTypes?: string[];
+    limit?: number;
+  } = {}): Promise<FileResult[]> {
+    const database = this.db.getDatabase();
+    const limit = options.limit || 100;
+    
+    let whereConditions: string[] = [];
+    const params: any[] = [];
+    
+    if (options.fileTypes?.length) {
+      const placeholders = options.fileTypes.map(() => '?').join(',');
+      whereConditions.push(`language IN (${placeholders})`);
+      params.push(...options.fileTypes);
+    }
+    
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+    
+    const query = `
+      SELECT 
+        id,
+        relative_path,
+        language,
+        size,
+        hash,
+        last_modified,
+        LENGTH(content) / 4 as tokens  -- Approximate token count
+      FROM files
+      ${whereClause}
+      ORDER BY relative_path
+      LIMIT ?
+    `;
+    
+    params.push(limit);
+    const files = database.prepare(query).all(...params) as FileQueryRow[];
+    
+    return files.map(file => ({
+      id: file.id,
+      path: file.relative_path,  // FileResult expects 'path' property
+      relativePath: file.relative_path,
+      language: file.language,
+      tokens: file.tokens || 0,
+      hash: file.hash,
+      lastModified: new Date(file.last_modified),
+      content: ''  // Don't include content in list view
+    }));
+  }
+
   public async getContextSummary(): Promise<string> {
     const stats = await this.db.getDatabaseInfo();
     const database = this.db.getDatabase();

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { indexCommand } from './index-command.js';
 import { queryCommand } from './query-command.js';
+import { listCommand } from './list-command.js';
 import { statsCommand } from './stats-command.js';
 import { clearCommand } from './clear-command.js';
 import { aliasCommand } from './alias-command.js';
@@ -22,6 +23,7 @@ export function createCLI(): Command {
   // Add essential AI-focused commands
   program.addCommand(indexCommand);
   program.addCommand(queryCommand);
+  program.addCommand(listCommand);
   program.addCommand(statsCommand);
   program.addCommand(clearCommand);
   program.addCommand(aliasCommand);

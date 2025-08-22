@@ -193,7 +193,7 @@ function outputAIFormat(endpoints: EndpointInfo[], groupBy: string) {
 
 function outputHumanFormat(endpoints: EndpointInfo[], groupBy: string) {
   console.log(chalk.blue('🔍 API Endpoints'));
-  console.log(chalk.gray('━'.repeat(60)));
+  console.log(chalk.gray('═'.repeat(60)));
   
   if (endpoints.length === 0) {
     console.log(chalk.yellow('No endpoints found.'));
@@ -219,6 +219,6 @@ function outputHumanFormat(endpoints: EndpointInfo[], groupBy: string) {
     });
   }
   
-  console.log(chalk.gray('\n━'.repeat(60)));
+  console.log(chalk.gray('\n' + '═'.repeat(60)));
   console.log(chalk.blue(`Total: ${endpoints.length} endpoints`));
 }

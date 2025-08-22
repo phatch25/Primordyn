@@ -31,7 +31,7 @@ export const statsCommand = new Command('stats')
       
       // Text output
       console.log(chalk.blue('📊 Primordyn Index Statistics'));
-      console.log(chalk.gray('━'.repeat(50)));
+      console.log(chalk.gray('═'.repeat(50)));
       
       if (dbInfo.fileCount === 0) {
         console.log(chalk.yellow('No files indexed yet.'));

@@ -3,12 +3,11 @@ import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { ContextRetriever } from '../retriever/index.js';
 import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges, SymbolResult } from '../types/index.js';
 import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
-import { AliasManager } from '../config/aliases.js';
 import chalk from 'chalk';
 
 export const queryCommand = new Command('query')
-  .description('Smart context retrieval for AI agents')
-  .argument('<search-term>', 'Symbol, function, class, or search query')
+  .description('Get detailed context for a specific symbol or file')
+  .argument('<target>', 'Exact symbol name or file path to retrieve')
   .option('--tokens <max>', 'Maximum tokens in response (default: 16000)', '16000')
   .option('--format <type>', 'Output format: ai, json, human (default: ai)', 'ai')
   .option('--depth <n>', 'Depth of context expansion (default: 1)', '1')
@@ -21,7 +20,6 @@ export const queryCommand = new Command('query')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
   .option('--refresh', 'Force refresh of index before query')
-  .option('--use-alias', 'Enable alias expansion (may impact performance)')
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs
@@ -35,19 +33,8 @@ export const queryCommand = new Command('query')
       
       const db = DatabaseConnectionPool.getConnection();
       
-      // Expand search term using aliases (only if explicitly enabled)
-      let expandedSearchTerm = validatedSearchTerm;
-      let isAliasExpanded = false;
-      
-      if (options.useAlias) {  // Only expand if --use-alias flag is provided
-        const aliasManager = new AliasManager(process.cwd());
-        expandedSearchTerm = aliasManager.expandAlias(validatedSearchTerm);
-        isAliasExpanded = expandedSearchTerm !== validatedSearchTerm;
-        
-        if (isAliasExpanded) {
-          console.log(chalk.gray(`Expanded alias "${validatedSearchTerm}" to: ${expandedSearchTerm}`));
-        }
-      }
+      // Query command focuses on exact matches - no alias expansion
+      const expandedSearchTerm = validatedSearchTerm;
       
       // Check if index exists, build only if empty
       const dbInfo = await db.getDatabaseInfo();
@@ -96,13 +83,13 @@ export const queryCommand = new Command('query')
       const retriever = new ContextRetriever(db);
       // const depth = parseInt(options.depth); // For future context expansion
       
-      // Use expanded search term for queries
-      const searchTermToUse = expandedSearchTerm;
+      // Query command focuses on exact matches
+      const searchTermToUse = validatedSearchTerm;
       
-      // First, try to find as a symbol (use original term for exact symbol match)
-      const symbols = await retriever.findSymbol(validatedSearchTerm, { fileTypes, symbolType });
+      // First, try to find as an exact symbol match
+      const symbols = await retriever.findSymbol(searchTermToUse, { fileTypes, symbolType });
       
-      // Then get broader context (use expanded term for broader search)
+      // If exact symbol found, get its context; otherwise try as file path
       const searchResult = await retriever.query(searchTermToUse, {
         maxTokens,
         includeContent: true,
@@ -157,10 +144,11 @@ export const queryCommand = new Command('query')
         truncated: searchResult.truncated
       };
       
-      // If no results found, try to get fuzzy suggestions
+      // For query command, if no exact match found, suggest using list command
       let suggestions: string[] = [];
       if (!result.primarySymbol && result.files.length === 0) {
-        suggestions = await retriever.getFuzzySuggestions(validatedSearchTerm, 5);
+        // Don't do fuzzy matching in query - that's what list is for
+        suggestions = [];
       }
       
       // Handle different output formats
@@ -195,11 +183,11 @@ export const queryCommand = new Command('query')
 function outputAIFormat(searchTerm: string, result: QueryCommandResult, options: QueryCommandOptions, suggestions?: string[]) {
   console.log(`# Context for: ${searchTerm}\n`);
   
-  // If no results but have suggestions
-  if (!result.primarySymbol && result.files.length === 0 && suggestions && suggestions.length > 0) {
-    console.log(`No exact matches found. Did you mean one of these?\n`);
-    suggestions.forEach(s => console.log(`  • ${s}`));
-    console.log(`\nTry: primordyn query "${suggestions[0]}"\n`);
+  // If no exact match found, suggest using list command
+  if (!result.primarySymbol && result.files.length === 0) {
+    console.log(`No exact match found for "${searchTerm}"\n`);
+    console.log(`Try using the list command to search for similar items:\n`);
+    console.log(`  primordyn list "${searchTerm}"\n`);
     return;
   }
   
@@ -504,17 +492,14 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
 
 function outputHumanFormat(searchTerm: string, result: QueryCommandResult, _options: QueryCommandOptions, suggestions?: string[]) {
   console.log(chalk.blue(`🔍 Context for: "${searchTerm}"`));
-  console.log(chalk.gray('━'.repeat(60)));
+  console.log(chalk.gray('═'.repeat(60)));
   
   if (!result.primarySymbol && result.files.length === 0) {
     console.log(chalk.yellow('No results found.'));
     
-    if (suggestions && suggestions.length > 0) {
-      console.log('\n' + chalk.green('💡 Did you mean:'));
-      suggestions.forEach(s => {
-        console.log(chalk.cyan(`  • ${s}`));
-      });
-      console.log('\n' + chalk.gray(`Try: primordyn query "${suggestions[0]}"`));
+    if (!suggestions || suggestions.length === 0) {
+      console.log('\n' + chalk.green('💡 Try the list command:'));
+      console.log(chalk.cyan(`  primordyn list "${searchTerm}"`));
     } else {
       console.log('\n' + chalk.blue('💡 Try:'));
       console.log('  • Different search terms');
@@ -563,7 +548,7 @@ function outputHumanFormat(searchTerm: string, result: QueryCommandResult, _opti
   }
   
   // Summary
-  console.log(chalk.gray('\n━'.repeat(60)));
+  console.log(chalk.gray('\n' + '═'.repeat(60)));
   console.log(chalk.blue('📊 Summary:'));
   console.log(`  • Symbols found: ${chalk.yellow(result.allSymbols.length)}`);
   console.log(`  • Files found: ${chalk.yellow(result.files.length)}`);
