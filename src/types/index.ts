@@ -18,7 +18,7 @@ export interface ScanOptions {
 
 export interface Symbol {
   name: string;
-  type: 'function' | 'class' | 'interface' | 'type' | 'variable' | 'constant' | 'export' | 'import' | 'method' | 'property' | 'namespace' | 'module' | 'struct' | 'enum' | 'trait';
+  type: 'function' | 'class' | 'interface' | 'type' | 'variable' | 'constant' | 'export' | 'import' | 'method' | 'property' | 'namespace' | 'module' | 'struct' | 'enum' | 'trait' | 'decorator' | 'endpoint' | 'middleware';
   lineStart: number;
   lineEnd: number;
   signature?: string;
@@ -243,6 +243,7 @@ export interface QueryCommandOptions {
   blame?: boolean;
   languages?: string;
   type?: string;
+  refresh?: boolean;
 }
 
 export interface FindCommandOptions {
@@ -319,6 +320,7 @@ export interface SymbolQueryRow extends SymbolRow {
   language?: string | null;
   lineStart?: number; // Alias for line_start used in some queries
   lineEnd?: number; // Alias for line_end used in some queries
+  fileContent?: string; // File content for extracting symbol body
 }
 
 export interface CallGraphRow {

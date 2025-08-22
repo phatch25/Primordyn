@@ -12,9 +12,11 @@ Primordyn indexes your codebase and provides intelligent context retrieval optim
 
 ## Features
 
+- **🔄 Auto-Refresh** - Index updates automatically on every query (always fresh!)
 - **Smart Symbol Resolution** - Find any function, class, or type with full context
 - **Fuzzy Search** - Typo-tolerant search that finds what you meant
 - **Symbol Type Filtering** - Search for specific types (classes, interfaces, functions)
+- **Framework Patterns** - Recognizes decorators (@router.post), endpoints, middleware
 - **Usage Tracking** - See where symbols are defined and used
 - **Git Integration** - View blame, history, and recent changes
 - **Impact Analysis** - Understand refactoring risks before making changes
@@ -33,10 +35,7 @@ npm install -g primordyn@alpha
 ## Quick Start
 
 ```bash
-# Index your codebase
-primordyn index
-
-# Find a symbol with full context
+# Just start querying! (auto-indexes on first use)
 primordyn query "YourClassName"
 
 # Show dependencies and relationships
@@ -44,6 +43,24 @@ primordyn query "functionName" --show-graph
 
 # Get project statistics
 primordyn stats
+
+# Manual index (optional - queries auto-refresh anyway)
+primordyn index
+```
+
+### 🔄 Auto-Refresh Feature
+
+Primordyn automatically refreshes the index on every query to ensure you always get up-to-date results. This happens silently and typically adds less than 1 second overhead.
+
+```bash
+# Default: auto-refresh enabled (silent)
+primordyn query "MyClass"
+
+# Skip refresh for maximum speed
+primordyn query "MyClass" --no-refresh
+
+# See refresh status
+PRIMORDYN_VERBOSE=true primordyn query "MyClass"
 ```
 
 ## Commands
@@ -92,9 +109,9 @@ primordyn query "databse"  # Will find "database"
 ```
 
 **Options:**
-- `--tokens <max>` - Maximum tokens in response (default: 8000)
+- `--tokens <max>` - Maximum tokens in response (default: 16000)
 - `--format <type>` - Output format: `ai`, `json`, `human` (default: ai)
-- `--type <symbol-type>` - Filter by symbol type (e.g., class, interface, function)
+- `--type <symbol-type>` - Filter by symbol type (e.g., class, interface, function, endpoint, decorator)
 - `--show-graph` - Show dependency relationships
 - `--include-callers` - Include all files that use this symbol
 - `--impact` - Show refactoring impact analysis
@@ -102,6 +119,7 @@ primordyn query "databse"  # Will find "database"
 - `--blame` - Show git blame information
 - `--recent <days>` - Show commits from last N days (default: 7)
 - `--depth <n>` - Depth of context expansion (default: 1)
+- `--no-refresh` - Skip auto-refresh of index (use existing index as-is)
 
 ### `primordyn stats`
 

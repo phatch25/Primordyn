@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import { ContextRetriever } from '../retriever/index.js';
 import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
 import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
+import { AliasManager } from '../config/aliases.js';
 import chalk from 'chalk';
 
 export const queryCommand = new Command('query')
@@ -19,6 +20,7 @@ export const queryCommand = new Command('query')
   .option('--blame', 'Show git blame (who last modified each line)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
+  .option('--no-refresh', 'Skip auto-refresh of index (use existing index as-is)')
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs
@@ -31,14 +33,72 @@ export const queryCommand = new Command('query')
       const symbolType = options.type;
       
       const db = new PrimordynDB();
+      
+      // Expand search term using aliases
+      const aliasManager = new AliasManager(process.cwd());
+      const expandedSearchTerm = aliasManager.expandAlias(validatedSearchTerm);
+      const isAliasExpanded = expandedSearchTerm !== validatedSearchTerm;
+      
+      if (isAliasExpanded && process.env.PRIMORDYN_VERBOSE === 'true') {
+        console.log(chalk.gray(`Expanded alias "${validatedSearchTerm}" to: ${expandedSearchTerm}`));
+      }
+      
+      // Auto-refresh index unless --no-refresh is specified
+      // This is fast (sub-second) for already-indexed repos due to hash checking
+      if (options.refresh !== false) {  // Commander sets refresh to false when --no-refresh is used
+        const { Indexer } = await import('../indexer/index.js');
+        const indexer = new Indexer(db);
+        
+        const dbInfo = await db.getDatabaseInfo();
+        const isFirstIndex = dbInfo.fileCount === 0;
+        
+        // Only show spinner for first index or if verbose mode requested
+        const showProgress = isFirstIndex || process.env.PRIMORDYN_VERBOSE === 'true';
+        
+        if (showProgress) {
+          const spinner = (await import('ora')).default(
+            isFirstIndex ? 'Building index for the first time...' : 'Refreshing index...'
+          ).start();
+          
+          try {
+            const stats = await indexer.index({ verbose: false, updateExisting: true });
+            
+            if (stats.filesIndexed > 0 || isFirstIndex) {
+              spinner.succeed(
+                `Index ${isFirstIndex ? 'built' : 'refreshed'}: ${stats.filesIndexed} files, ${stats.symbolsExtracted} symbols (${(stats.timeElapsed / 1000).toFixed(2)}s)`
+              );
+            } else {
+              spinner.stop(); // Silent when no changes
+            }
+          } catch (error) {
+            spinner.fail('Failed to update index');
+            throw error;
+          }
+        } else {
+          // Silent refresh - the magic happens here
+          // This typically takes <50ms when no changes, <200ms with a few file changes
+          await indexer.index({ verbose: false, updateExisting: true });
+        }
+      } else {
+        // Check if index exists when --no-refresh is used
+        const dbInfo = await db.getDatabaseInfo();
+        if (dbInfo.fileCount === 0) {
+          console.log(chalk.yellow('⚠️  No index found. Run without --no-refresh to build index.'));
+          process.exit(1);
+        }
+      }
+      
       const retriever = new ContextRetriever(db);
       // const depth = parseInt(options.depth); // For future context expansion
       
-      // First, try to find as a symbol
+      // Use expanded search term for queries
+      const searchTermToUse = expandedSearchTerm;
+      
+      // First, try to find as a symbol (use original term for exact symbol match)
       const symbols = await retriever.findSymbol(validatedSearchTerm, { fileTypes, symbolType });
       
-      // Then get broader context
-      const searchResult = await retriever.query(validatedSearchTerm, {
+      // Then get broader context (use expanded term for broader search)
+      const searchResult = await retriever.query(searchTermToUse, {
         maxTokens,
         includeContent: true,
         includeSymbols: true,

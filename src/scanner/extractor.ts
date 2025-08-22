@@ -548,7 +548,10 @@ export class ContextExtractor {
       'module': 'other',
       'struct': 'classes',
       'enum': 'types',
-      'trait': 'interfaces'
+      'trait': 'interfaces',
+      'decorator': 'other',
+      'endpoint': 'functions',
+      'middleware': 'functions'
     };
 
     return categoryMap[type] || 'other';

@@ -101,9 +101,9 @@ export const statsCommand = new Command('stats')
       // Quick tips
       console.log(chalk.green('\n💡 Quick Tips:'));
       console.log(`  • Search: ${chalk.cyan('primordyn query "search term"')}`);
-      console.log(`  • Symbol type filter: ${chalk.cyan('primordyn query "search" --type class')}`);
+      console.log(`  • Type filters: ${chalk.cyan('--type function|class|endpoint|decorator')}`);
       console.log(`  • Show impact: ${chalk.cyan('primordyn query "functionName" --impact')}`);
-      console.log(`  • Update index: ${chalk.cyan('primordyn index --update')}`);
+      console.log(`  • Skip refresh: ${chalk.cyan('primordyn query "term" --no-refresh')}`);
       
       db.close();
       

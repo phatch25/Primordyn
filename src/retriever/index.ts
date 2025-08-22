@@ -56,19 +56,52 @@ export class ContextRetriever {
         const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
         symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
       } else {
-        // Fall back to LIKE queries for special characters
+        // Fall back to LIKE queries for special characters or OR queries
         const fileQuery = this.buildFileLikeQuery(searchTerm, options);
-        const params = [`%${searchTerm}%`, `%${searchTerm}%`];
+        
+        // Build params based on whether it's an OR query
+        const params: string[] = [];
+        if (searchTerm.includes(' OR ')) {
+          const terms = searchTerm.split(/\s+OR\s+/i);
+          terms.forEach(term => {
+            params.push(`%${term.trim()}%`, `%${term.trim()}%`);
+          });
+        } else {
+          params.push(`%${searchTerm}%`, `%${searchTerm}%`);
+        }
+        
         if (options.fileTypes?.length) {
           params.push(...options.fileTypes);
         }
         files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
         
         const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
-        const symbolParams = [`%${searchTerm}%`, `%${searchTerm}%`];
+        const symbolParams: string[] = [];
+        
+        // Build symbol params based on whether it's an OR query
+        if (searchTerm.includes(' OR ')) {
+          const terms = searchTerm.split(/\s+OR\s+/i);
+          terms.forEach(term => {
+            symbolParams.push(`%${term.trim()}%`, `%${term.trim()}%`, `%${term.trim()}%`);
+          });
+        } else {
+          symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
+        }
+        
         if (options.fileTypes?.length) {
           symbolParams.push(...options.fileTypes);
         }
+        
+        // Add parameters for ORDER BY (only for non-OR queries)
+        if (!searchTerm.includes(' OR ')) {
+          const hasMultipleWords = searchTerm.trim().split(/\s+/).length > 1;
+          if (hasMultipleWords) {
+            symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`);
+          } else {
+            symbolParams.push(searchTerm, `%${searchTerm}%`);
+          }
+        }
+        
         symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
       }
     }
@@ -508,13 +541,13 @@ export class ContextRetriever {
           f.content as fileContent
         FROM symbols s
         JOIN files f ON s.file_id = f.id
-        WHERE (s.name LIKE ? OR s.signature LIKE ?)
+        WHERE (s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
         ORDER BY LENGTH(s.name)
         LIMIT 20
       `;
 
-      symbols = database.prepare(symbolQuery).all(`%${query}%`, `%${query}%`) as SymbolQueryRow[];
+      symbols = database.prepare(symbolQuery).all(`%${query}%`, `%${query}%`, `%${query}%`) as SymbolQueryRow[];
     }
 
     // Process results
@@ -668,8 +701,16 @@ export class ContextRetriever {
       signature: symbol.signature || undefined
     };
 
-    // Note: fileContent would need to be added to SymbolQueryRow if needed
-    // For now, we don't extract content in processSymbolResult
+    // Extract symbol content if fileContent is available
+    if (symbol.fileContent) {
+      const lines = symbol.fileContent.split('\n');
+      const startLine = (symbol.lineStart || symbol.line_start) - 1;
+      const endLine = (symbol.lineEnd || symbol.line_end);
+      
+      if (startLine >= 0 && endLine <= lines.length) {
+        result.content = lines.slice(startLine, endLine).join('\n');
+      }
+    }
 
     return result;
   }
@@ -683,7 +724,7 @@ export class ContextRetriever {
     }
   }
   
-  private extractRelevantContent(content: string, options: QueryOptions): string {
+  private extractRelevantContent(content: string, _options: QueryOptions): string {
     const lines = content.split('\n');
     const maxLines = 200; // Reasonable limit for context
     
@@ -1443,8 +1484,27 @@ export class ContextRetriever {
   
   private escapeFTS5(term: string): string {
     // FTS5 special characters that need escaping or removal
-    // If the term contains only special characters, return empty to trigger LIKE fallback
-    const cleaned = term.replace(/[^a-zA-Z0-9\s_-]/g, '');
+    // For special patterns like decorators (@router.post) or function calls (Depends())
+    // we'll return empty to trigger LIKE fallback which handles them better
+    
+    // Check if this is a decorator pattern (starts with @)
+    if (term.startsWith('@')) {
+      return ''; // Use LIKE for decorator searches
+    }
+    
+    // Check if this contains parentheses (function call pattern)
+    if (term.includes('(') || term.includes(')')) {
+      return ''; // Use LIKE for function call patterns
+    }
+    
+    // Check if this is an expanded alias with OR operators
+    if (term.includes(' OR ')) {
+      // For expanded aliases, we need to use LIKE since FTS5 OR syntax is complex
+      return ''; // Fall back to LIKE for OR queries
+    }
+    
+    // Remove special characters but preserve dots for module paths
+    const cleaned = term.replace(/[^a-zA-Z0-9\s._-]/g, '');
     
     // If nothing remains after cleaning, we can't use FTS5
     if (cleaned.trim().length === 0) {
@@ -1573,13 +1633,26 @@ export class ContextRetriever {
     return candidates.slice(0, 10);
   }
   
-  private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {
+  private buildFileLikeQuery(searchTerm: string, options: QueryOptions): string {
+    // Check if this is an OR query (expanded alias)
+    const isOrQuery = searchTerm.includes(' OR ');
+    let whereClause: string;
+    
+    if (isOrQuery) {
+      // Split OR terms and build conditions for each
+      const terms = searchTerm.split(/\s+OR\s+/i);
+      const conditions = terms.map(() => '(f.content LIKE ? OR f.relative_path LIKE ?)').join(' OR ');
+      whereClause = `WHERE (${conditions})`;
+    } else {
+      whereClause = 'WHERE (f.content LIKE ? OR f.relative_path LIKE ?)';
+    }
+    
     let query = `
       SELECT 
         f.id, f.path, f.relative_path, f.content, 
         f.language, f.metadata, f.size, f.last_modified
       FROM files f
-      WHERE (f.content LIKE ? OR f.relative_path LIKE ?)
+      ${whereClause}
     `;
     
     if (options.fileTypes && options.fileTypes.length > 0) {
@@ -1590,20 +1663,63 @@ export class ContextRetriever {
     return query;
   }
   
-  private buildSymbolLikeQuery(_searchTerm: string, options: QueryOptions): string {
+  private buildSymbolLikeQuery(searchTerm: string, options: QueryOptions): string {
+    // Check if this is an OR query (expanded alias)
+    const isOrQuery = searchTerm.includes(' OR ');
+    let whereClause: string;
+    
+    if (isOrQuery) {
+      // Split OR terms and build conditions for each
+      const terms = searchTerm.split(/\s+OR\s+/i);
+      const conditions = terms.map(() => '(s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)').join(' OR ');
+      whereClause = `WHERE (${conditions})`;
+    } else {
+      whereClause = 'WHERE (s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)';
+    }
+    
+    // For multi-word searches like "async def get_current_user", prioritize signature matches
+    const hasMultipleWords = !isOrQuery && searchTerm.trim().split(/\s+/).length > 1;
+    
     let query = `
       SELECT 
         s.*, f.relative_path as filePath, f.language, f.content as fileContent
       FROM symbols s
       JOIN files f ON s.file_id = f.id
-      WHERE (s.name LIKE ? OR s.signature LIKE ?)
+      ${whereClause}
     `;
+    
+    if (options.symbolType) {
+      query += ` AND s.type = '${options.symbolType}'`;
+    }
     
     if (options.fileTypes && options.fileTypes.length > 0) {
       query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
     }
     
-    query += ' ORDER BY s.name LIMIT 100';
+    // Better ordering: prioritize exact matches and signature matches for multi-word queries
+    if (isOrQuery) {
+      // For OR queries, just order by name length
+      query += ` ORDER BY LENGTH(s.name) LIMIT 100`;
+    } else if (hasMultipleWords) {
+      query += ` ORDER BY 
+        CASE 
+          WHEN s.signature LIKE ? THEN 0
+          WHEN s.name LIKE ? THEN 1
+          ELSE 2
+        END,
+        LENGTH(s.name)
+      LIMIT 100`;
+    } else {
+      query += ` ORDER BY 
+        CASE 
+          WHEN LOWER(s.name) = LOWER(?) THEN 0
+          WHEN s.name LIKE ? THEN 1
+          ELSE 2
+        END,
+        LENGTH(s.name)
+      LIMIT 100`;
+    }
+    
     return query;
   }
   

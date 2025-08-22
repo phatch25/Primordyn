@@ -469,7 +469,10 @@ export class TreeSitterExtractor extends BaseExtractor {
       'namespace': 'namespaces',
       'module': 'modules',
       'export': 'exports',
-      'import': 'imports'
+      'import': 'imports',
+      'decorator': 'decorators',
+      'endpoint': 'endpoints',
+      'middleware': 'middleware'
     };
     
     return categoryMap[type] || 'other';
