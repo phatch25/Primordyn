@@ -4,6 +4,7 @@ import { queryCommand } from './query-command.js';
 import { statsCommand } from './stats-command.js';
 import { clearCommand } from './clear-command.js';
 import { aliasCommand } from './alias-command.js';
+import { endpointsCommand } from './endpoints-command.js';
 import chalk from 'chalk';
 
 export function createCLI(): Command {
@@ -24,6 +25,7 @@ export function createCLI(): Command {
   program.addCommand(statsCommand);
   program.addCommand(clearCommand);
   program.addCommand(aliasCommand);
+  program.addCommand(endpointsCommand);
 
   // Global error handler
   program.exitOverride((err) => {

@@ -12,7 +12,7 @@ Primordyn indexes your codebase and provides intelligent context retrieval optim
 
 ## Features
 
-- **🔄 Auto-Refresh** - Index updates automatically on every query (always fresh!)
+- **⚡ Blazing Fast** - Optimized for sub-second query performance
 - **Smart Symbol Resolution** - Find any function, class, or type with full context
 - **Fuzzy Search** - Typo-tolerant search that finds what you meant
 - **Symbol Type Filtering** - Search for specific types (classes, interfaces, functions)
@@ -44,22 +44,25 @@ primordyn query "functionName" --show-graph
 # Get project statistics
 primordyn stats
 
-# Manual index (optional - queries auto-refresh anyway)
+# Refresh index when files change
 primordyn index
 ```
 
-### 🔄 Auto-Refresh Feature
+### ⚡ Performance
 
-Primordyn automatically refreshes the index on every query to ensure you always get up-to-date results. This happens silently and typically adds less than 1 second overhead.
+Primordyn is optimized for speed. Queries typically complete in under a second.
 
 ```bash
-# Default: auto-refresh enabled (silent)
+# Standard query (fast)
 primordyn query "MyClass"
 
-# Skip refresh for maximum speed
-primordyn query "MyClass" --no-refresh
+# Force index refresh if needed
+primordyn query "MyClass" --refresh
 
-# See refresh status
+# Use search aliases (may impact performance)
+primordyn query "api" --use-alias
+
+# See verbose output
 PRIMORDYN_VERBOSE=true primordyn query "MyClass"
 ```
 

@@ -5,6 +5,7 @@ import type { NodePath } from '@babel/traverse';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse = (_traverse as any)?.default || _traverse;
 import { BaseExtractor } from './base.js';
+import { EndpointDetector } from './endpoint-detector.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
 import type { 
   BabelNode, 
@@ -19,6 +20,13 @@ import type {
 } from './types.js';
 
 export class TypeScriptExtractor extends BaseExtractor {
+  private endpointDetector: EndpointDetector;
+  
+  constructor() {
+    super();
+    this.endpointDetector = new EndpointDetector();
+  }
+  
   getSupportedLanguages(): string[] {
     return ['typescript', 'javascript', 'jsx', 'tsx'];
   }
@@ -143,6 +151,27 @@ export class TypeScriptExtractor extends BaseExtractor {
       
       // Build structure
       context.structure = this.buildStructure(context.symbols);
+      
+      // Detect API endpoints
+      const endpoints = this.endpointDetector.detectEndpoints(this.content, fileInfo.path);
+      
+      // Merge endpoints with existing symbols, avoiding duplicates
+      const existingLines = new Set(context.symbols.map(s => `${s.lineStart}-${s.name}`));
+      for (const endpoint of endpoints) {
+        const key = `${endpoint.lineStart}-${endpoint.name}`;
+        if (!existingLines.has(key)) {
+          context.symbols.push(endpoint);
+        }
+      }
+      
+      // Mark existing functions/methods as endpoints if they match patterns
+      for (const symbol of context.symbols) {
+        if (symbol.type === 'function' || symbol.type === 'method') {
+          if (this.endpointDetector.isLikelyEndpoint(symbol)) {
+            symbol.metadata = { ...symbol.metadata, isEndpoint: true };
+          }
+        }
+      }
       
     } catch {
       // Fallback to regex-based extraction if AST parsing fails

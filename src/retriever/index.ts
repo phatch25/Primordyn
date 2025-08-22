@@ -1547,8 +1547,14 @@ export class ContextRetriever {
       return ''; // Fall back to LIKE for OR queries
     }
     
-    // Remove special characters but preserve dots for module paths
-    const cleaned = term.replace(/[^a-zA-Z0-9\s._-]/g, '');
+    // Check for dots which might indicate method calls or module paths
+    // FTS5 doesn't handle dots well, so use LIKE for these patterns
+    if (term.includes('.')) {
+      return ''; // Use LIKE for patterns with dots (e.g., router.post, app.get)
+    }
+    
+    // Remove special characters
+    const cleaned = term.replace(/[^a-zA-Z0-9\s_-]/g, '');
     
     // If nothing remains after cleaning, we can't use FTS5
     if (cleaned.trim().length === 0) {

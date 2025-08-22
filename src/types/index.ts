@@ -244,6 +244,7 @@ export interface QueryCommandOptions {
   languages?: string;
   type?: string;
   refresh?: boolean;
+  useAlias?: boolean;
 }
 
 export interface FindCommandOptions {

@@ -1,8 +1,7 @@
 import { Command } from 'commander';
-import { PrimordynDB } from '../database/index.js';
 import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { ContextRetriever } from '../retriever/index.js';
-import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges } from '../types/index.js';
+import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges, SymbolResult } from '../types/index.js';
 import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
 import { AliasManager } from '../config/aliases.js';
 import chalk from 'chalk';
@@ -21,7 +20,8 @@ export const queryCommand = new Command('query')
   .option('--blame', 'Show git blame (who last modified each line)')
   .option('--languages <langs>', 'Filter by languages: ts,js,py,go,etc')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
-  .option('--no-refresh', 'Skip auto-refresh of index (use existing index as-is)')
+  .option('--refresh', 'Force refresh of index before query')
+  .option('--use-alias', 'Enable alias expansion (may impact performance)')
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs
@@ -35,59 +35,63 @@ export const queryCommand = new Command('query')
       
       const db = DatabaseConnectionPool.getConnection();
       
-      // Expand search term using aliases
-      const aliasManager = new AliasManager(process.cwd());
-      const expandedSearchTerm = aliasManager.expandAlias(validatedSearchTerm);
-      const isAliasExpanded = expandedSearchTerm !== validatedSearchTerm;
+      // Expand search term using aliases (only if explicitly enabled)
+      let expandedSearchTerm = validatedSearchTerm;
+      let isAliasExpanded = false;
       
-      if (isAliasExpanded && process.env.PRIMORDYN_VERBOSE === 'true') {
-        console.log(chalk.gray(`Expanded alias "${validatedSearchTerm}" to: ${expandedSearchTerm}`));
+      if (options.useAlias) {  // Only expand if --use-alias flag is provided
+        const aliasManager = new AliasManager(process.cwd());
+        expandedSearchTerm = aliasManager.expandAlias(validatedSearchTerm);
+        isAliasExpanded = expandedSearchTerm !== validatedSearchTerm;
+        
+        if (isAliasExpanded) {
+          console.log(chalk.gray(`Expanded alias "${validatedSearchTerm}" to: ${expandedSearchTerm}`));
+        }
       }
       
-      // Auto-refresh index unless --no-refresh is specified
-      // This is fast (sub-second) for already-indexed repos due to hash checking
-      if (options.refresh !== false) {  // Commander sets refresh to false when --no-refresh is used
+      // Check if index exists, build only if empty
+      const dbInfo = await db.getDatabaseInfo();
+      const isFirstIndex = dbInfo.fileCount === 0;
+      
+      if (isFirstIndex) {
+        // First time - must build index
         const { Indexer } = await import('../indexer/index.js');
         const indexer = new Indexer(db);
         
-        const dbInfo = await db.getDatabaseInfo();
-        const isFirstIndex = dbInfo.fileCount === 0;
+        const spinner = (await import('ora')).default('Building index for the first time...').start();
         
-        // Only show spinner for first index or if verbose mode requested
-        const showProgress = isFirstIndex || process.env.PRIMORDYN_VERBOSE === 'true';
-        
-        if (showProgress) {
-          const spinner = (await import('ora')).default(
-            isFirstIndex ? 'Building index for the first time...' : 'Refreshing index...'
-          ).start();
-          
-          try {
-            const stats = await indexer.index({ verbose: false, updateExisting: true });
-            
-            if (stats.filesIndexed > 0 || isFirstIndex) {
-              spinner.succeed(
-                `Index ${isFirstIndex ? 'built' : 'refreshed'}: ${stats.filesIndexed} files, ${stats.symbolsExtracted} symbols (${(stats.timeElapsed / 1000).toFixed(2)}s)`
-              );
-            } else {
-              spinner.stop(); // Silent when no changes
-            }
-          } catch (error) {
-            spinner.fail('Failed to update index');
-            throw error;
-          }
-        } else {
-          // Silent refresh - the magic happens here
-          // This typically takes <50ms when no changes, <200ms with a few file changes
-          await indexer.index({ verbose: false, updateExisting: true });
+        try {
+          const stats = await indexer.index({ verbose: false, updateExisting: true });
+          spinner.succeed(
+            `Index built: ${stats.filesIndexed} files, ${stats.symbolsExtracted} symbols (${(stats.timeElapsed / 1000).toFixed(2)}s)`
+          );
+        } catch (error) {
+          spinner.fail('Failed to build index');
+          throw error;
         }
-      } else {
-        // Check if index exists when --no-refresh is used
-        const dbInfo = await db.getDatabaseInfo();
-        if (dbInfo.fileCount === 0) {
-          console.log(chalk.yellow('⚠️  No index found. Run without --no-refresh to build index.'));
-          process.exit(1);
+      } else if (options.refresh === true) {
+        // Only refresh if explicitly requested with --refresh flag
+        const { Indexer } = await import('../indexer/index.js');
+        const indexer = new Indexer(db);
+        
+        const spinner = (await import('ora')).default('Refreshing index...').start();
+        
+        try {
+          const stats = await indexer.index({ verbose: false, updateExisting: true });
+          
+          if (stats.filesIndexed > 0) {
+            spinner.succeed(
+              `Index refreshed: ${stats.filesIndexed} files updated, ${stats.symbolsExtracted} symbols (${(stats.timeElapsed / 1000).toFixed(2)}s)`
+            );
+          } else {
+            spinner.succeed('Index is up to date');
+          }
+        } catch (error) {
+          spinner.fail('Failed to refresh index');
+          throw error;
         }
       }
+      // Otherwise, use existing index as-is for maximum performance
       
       const retriever = new ContextRetriever(db);
       // const depth = parseInt(options.depth); // For future context expansion
@@ -199,24 +203,82 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
     return;
   }
   
-  // Primary symbol if found
-  if (result.primarySymbol) {
+  // Check if we're looking for endpoints
+  const isEndpointSearch = options.type === 'endpoint' || 
+    searchTerm.toLowerCase().includes('router') || 
+    searchTerm.toLowerCase().includes('endpoint') ||
+    searchTerm.toLowerCase().includes('@app') ||
+    searchTerm.toLowerCase().includes('@router');
+  
+  // Collect all endpoint-like symbols from both allSymbols and file symbols
+  const allEndpoints: SymbolResult[] = [];
+  
+  if (isEndpointSearch) {
+    // Add from allSymbols
+    result.allSymbols.forEach(sym => {
+      if (sym.type === 'endpoint' || sym.type === 'decorator' || 
+          sym.signature?.includes('@router') || sym.signature?.includes('@app')) {
+        allEndpoints.push(sym);
+      }
+    });
+    
+    // Also extract from files if we have them
+    result.files.forEach(file => {
+      if (file.symbols) {
+        file.symbols.forEach(sym => {
+          if (sym.type === 'endpoint' || sym.type === 'decorator' ||
+              sym.name?.includes('@router') || sym.name?.includes('@app')) {
+            // Add file path and line info if not present
+            allEndpoints.push({
+              ...sym,
+              filePath: sym.filePath || file.relativePath,
+              lineStart: sym.lineStart || 0,
+              lineEnd: sym.lineEnd || 0,
+              id: sym.id || 0,
+              type: sym.type || 'endpoint'
+            } as SymbolResult);
+          }
+        });
+      }
+    });
+  }
+  
+  if (isEndpointSearch && allEndpoints.length > 0) {
+    // Show endpoints in a useful format
+    console.log(`## API Endpoints\n`);
+    const byFile: Record<string, typeof allEndpoints> = {};
+    
+    allEndpoints.forEach(sym => {
+      const filePath = sym.filePath || 'unknown';
+      if (!byFile[filePath]) byFile[filePath] = [];
+      byFile[filePath].push(sym);
+    });
+    
+    Object.entries(byFile).forEach(([file, syms]) => {
+      console.log(`### ${file}\n`);
+      syms.forEach(sym => {
+        // Extract route from signature
+        const routeMatch = sym.signature?.match(/["']([^"']+)["']/)?.[1] || 
+                          sym.name?.match(/["']([^"']+)["']/)?.[1] || 'unknown';
+        const methodMatch = sym.signature?.match(/(GET|POST|PUT|DELETE|PATCH|get|post|put|delete|patch)/i)?.[1]?.toUpperCase() || 
+                           sym.name?.match(/(GET|POST|PUT|DELETE|PATCH|get|post|put|delete|patch)/i)?.[1]?.toUpperCase() || 'GET';
+        const handler = sym.name?.replace(/@router\.(get|post|put|delete|patch)/i, '').trim() || sym.name || 'handler';
+        console.log(`- \`${methodMatch} ${routeMatch}\` → ${handler} (line ${sym.lineStart || 0})`);
+      });
+      console.log();
+    });
+    
+    console.log(`Total endpoints found: ${allEndpoints.length}\n`);
+  } else if (result.primarySymbol) {
+    // Show the primary symbol with its implementation
     const sym = result.primarySymbol;
     console.log(`## ${sym.name} (${sym.type})`);
-    console.log(`📍 ${sym.filePath}:${sym.lineStart}-${sym.lineEnd}\n`);
+    console.log(`📍 ${sym.filePath}:${sym.lineStart}\n`);
     
     if (sym.signature) {
-      console.log(`### Signature`);
       console.log(`\`\`\`typescript`);
       console.log(sym.signature);
       console.log(`\`\`\`\n`);
-    }
-    
-    // Show documentation if available
-    if ((sym as any).documentation) {
-      console.log(`### Documentation`);
-      console.log((sym as any).documentation);
-      console.log();
     }
     
     if (sym.content) {
@@ -227,37 +289,49 @@ function outputAIFormat(searchTerm: string, result: QueryCommandResult, options:
     }
   }
   
-  // Related symbols
-  if (result.allSymbols.length > 1) {
-    console.log(`### Related Symbols`);
+  // Show additional matches if we didn't show endpoints
+  if (!isEndpointSearch && result.allSymbols.length > 1) {
+    console.log(`### Additional Matches`);
     result.allSymbols.slice(1, 6).forEach((sym) => {
       console.log(`- **${sym.name}** (${sym.type}) - ${sym.filePath}:${sym.lineStart}`);
     });
     console.log();
   }
   
-  // Files that contain or use this
-  if (result.files.length > 0) {
+  // Show files if no primary symbol was found and we're not in endpoint mode
+  if (!result.primarySymbol && !isEndpointSearch && result.files.length > 0) {
     console.log(`### Found in Files`);
-    result.files.slice(0, 5).forEach((file) => {
-      console.log(`- **${file.relativePath}** (${file.tokens} tokens)`);
+    result.files.slice(0, 10).forEach((file) => {
+      console.log(`- **${file.relativePath}**`);
       
-      // Always show imports/exports for context, not just relevant ones
-      if (file.imports && file.imports.length > 0) {
-        console.log(`  - Imports: ${file.imports.slice(0, 5).join(', ')}${file.imports.length > 5 ? ` (+${file.imports.length - 5} more)` : ''}`);
-      }
-      
-      if (file.exports && file.exports.length > 0) {
-        console.log(`  - Exports: ${file.exports.slice(0, 5).join(', ')}${file.exports.length > 5 ? ` (+${file.exports.length - 5} more)` : ''}`);
-      }
-      
-      // Show symbols in this file
+      // Show relevant symbols from this file
       if (file.symbols && file.symbols.length > 0) {
         const relevantSymbols = file.symbols.filter((sym) =>
-          sym.name.toLowerCase().includes(searchTerm.toLowerCase())
+          sym.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          sym.signature?.toLowerCase().includes(searchTerm.toLowerCase())
         );
+        
         if (relevantSymbols.length > 0) {
-          console.log(`  - Contains: ${relevantSymbols.map((s) => `${s.name} (${s.type})`).join(', ')}`);
+          relevantSymbols.slice(0, 5).forEach((s) => {
+            const lineInfo = s.lineStart ? `:${s.lineStart}` : '';
+            console.log(`  - ${s.name} (${s.type})${lineInfo}`);
+          });
+          if (relevantSymbols.length > 5) {
+            console.log(`  - ... and ${relevantSymbols.length - 5} more matches`);
+          }
+        } else {
+          console.log(`  - ${file.tokens} tokens`);
+        }
+      }
+      
+      // If we have content and tokens available, show a preview
+      if (file.content && options.tokens && parseInt(options.tokens) > 8000) {
+        const preview = file.content.split('\n').slice(0, 20).join('\n');
+        if (preview.length > 0) {
+          console.log('  ```');
+          console.log('  ' + preview.split('\n').slice(0, 10).join('\n  '));
+          console.log('  ...');
+          console.log('  ```');
         }
       }
     });

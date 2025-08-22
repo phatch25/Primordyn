@@ -44,43 +44,43 @@ export class AliasManager {
   private initializeDefaults(): void {
     const defaultAliases: SearchAlias[] = [
       {
-        name: 'database',
-        expansion: 'query OR select OR insert OR update OR delete OR transaction OR repository',
+        name: 'db',
+        expansion: 'database OR query OR repository',
         description: 'Database operations and queries'
       },
       {
         name: 'api',
-        expansion: 'router OR route OR endpoint OR controller OR handler OR middleware',
+        expansion: 'router OR endpoint OR controller',
         description: 'API endpoints and handlers'
       },
       {
         name: 'auth',
-        expansion: 'login OR authenticate OR authorize OR token OR session OR jwt OR oauth',
+        expansion: 'authenticate OR token OR session',
         description: 'Authentication and authorization'
       },
       {
         name: 'test',
-        expansion: 'test OR spec OR describe OR it OR expect OR assert OR mock',
+        expansion: 'test OR spec OR describe',
         description: 'Test files and testing code'
       },
       {
         name: 'config',
-        expansion: 'config OR settings OR environment OR env OR options',
+        expansion: 'config OR settings OR env',
         description: 'Configuration and settings'
       },
       {
         name: 'error',
-        expansion: 'error OR exception OR throw OR catch OR try OR fail',
+        expansion: 'error OR exception OR catch',
         description: 'Error handling and exceptions'
       },
       {
         name: 'cache',
-        expansion: 'cache OR redis OR memcache OR memoize OR cached',
+        expansion: 'cache OR redis OR memoize',
         description: 'Caching logic and cache operations'
       },
       {
         name: 'log',
-        expansion: 'log OR logger OR console OR debug OR info OR warn OR error',
+        expansion: 'log OR logger OR debug',
         description: 'Logging and debugging'
       }
     ];
