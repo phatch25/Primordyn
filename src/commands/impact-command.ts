@@ -137,27 +137,42 @@ export const impactCommand = new Command('impact')
     }
   })
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Assess the risk of changing code. Shows exactly what will break if you
+  modify, rename, or remove a symbol, helping you make safe refactoring decisions.
+
 ${chalk.bold('Examples:')}
-  ${chalk.gray('# Analyze impact of changing a function')}
+  ${chalk.gray('# Check what breaks if you change processData')}
   $ primordyn impact processData
+  ${chalk.gray('→ Shows: 5 direct callers, 12 text references')}
   
-  ${chalk.gray('# Check deeper transitive impacts')}  
+  ${chalk.gray('# Analyze deeper transitive impacts')}  
   $ primordyn impact UserService --depth 3
   
-  ${chalk.gray('# Get JSON for tooling')}
+  ${chalk.gray('# Get machine-readable analysis')}
   $ primordyn impact AuthService --format json
 
-${chalk.bold('What it shows:')}
-  • Direct callers (who calls this function/class)
-  • Text references (imports, type usage, comments)
-  • Breaking change scenarios
-  • Risk assessment
+${chalk.bold('What it analyzes:')}
+  • Direct callers - functions/methods that call this
+  • Text references - imports, types, string refs
+  • Breaking scenarios - what changes are safe vs risky
+  • Risk level - safe, low risk, or high risk
+
+${chalk.bold('Breaking change guide:')}
+  ✅ Safe: Adding optional parameters, new methods
+  ⚠️  Risky: Removing, renaming, changing signatures
+  
+${chalk.bold('Risk levels:')}
+  • Safe to modify - no dependencies found
+  • Low risk - < 3 callers, < 5 references
+  • High risk - widespread usage
 
 ${chalk.bold('Use before:')}
-  • Renaming symbols
-  • Changing signatures
-  • Removing functionality
-  • Major refactoring`);
+  • Renaming functions or classes
+  • Changing method signatures
+  • Removing features
+  • Major refactoring
+  • API changes`);
 
 function analyzeBreaking(target: any, directCallers: any[], textRefs: any[]) {
   const changes = [];

@@ -43,25 +43,43 @@ export const aliasCommand = new Command('alias')
     });
   })
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Create semantic groups of related terms for easier discovery. Aliases help
+  AI assistants find all related code without knowing exact naming conventions.
+
 ${chalk.bold('Examples:')}
-  ${chalk.gray('# List all aliases')}
+  ${chalk.gray('# List all configured aliases')}
   $ primordyn alias
   
-  ${chalk.gray('# Set/update an alias')}
-  $ primordyn alias auth "login OR logout OR session OR token"
-  $ primordyn alias database "db OR sql OR query OR connection"
+  ${chalk.gray('# Create an alias for authentication concepts')}
+  $ primordyn alias auth "login OR logout OR session OR token OR authenticate"
   
-  ${chalk.gray('# Show specific alias')}
+  ${chalk.gray('# Create an alias for database operations')}
+  $ primordyn alias database "db OR sql OR query OR connection OR repository"
+  
+  ${chalk.gray('# Show what an alias expands to')}
   $ primordyn alias auth
+  ${chalk.gray('→ auth: login OR logout OR session OR token OR authenticate')}
   
-  ${chalk.gray('# Use in search')}
-  $ primordyn list @auth     ${chalk.gray('# Expands to: login OR logout OR session OR token')}
+  ${chalk.gray('# Use alias in discovery')}
+  $ primordyn list @auth
+  ${chalk.gray('→ Searches for: login OR logout OR session OR token OR authenticate')}
+  
+  ${chalk.gray('# Remove an alias')}
+  $ primordyn alias rm auth
 
 ${chalk.bold('Common patterns:')}
-  • auth → authentication/authorization terms
-  • data → database/storage/persistence terms  
-  • api → endpoint/route/controller terms
-  • ui → component/view/render terms`);
+  • auth → login, logout, session, token, authenticate
+  • data → database, db, sql, query, repository
+  • api → endpoint, route, controller, handler
+  • ui → component, view, render, template
+  • test → spec, test, mock, fixture, stub
+
+${chalk.bold('How it works:')}
+  • Aliases are project-specific (stored in .primordyn/)
+  • Use OR to combine multiple search terms
+  • Prefix with @ when using in 'list' command
+  • Case-insensitive matching`);
 
 // Remove subcommand - simplified to just the 'rm' shorthand
 aliasCommand

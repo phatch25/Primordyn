@@ -82,20 +82,33 @@ export const statsCommand = new Command('stats')
     }
   })
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Get a quick overview of your indexed codebase. Shows statistics about
+  files, symbols, languages, and index status.
+
 ${chalk.bold('Examples:')}
-  ${chalk.gray('# Show basic statistics')}
+  ${chalk.gray('# Show index overview')}
   $ primordyn stats
+  ${chalk.gray('→ Files: 245, Symbols: 1,847, Tokens: 125,432')}
   
-  ${chalk.gray('# Show detailed breakdown')}
+  ${chalk.gray('# Show detailed breakdown with largest files')}
   $ primordyn stats --detailed
   
-  ${chalk.gray('# Get JSON output for scripts')}
+  ${chalk.gray('# Get JSON for automation')}
   $ primordyn stats --json
 
-${chalk.bold('Use cases:')}
-  • Check if index exists before querying
-  • Monitor index size and token usage
-  • See language distribution in project`);
+${chalk.bold('What it shows:')}
+  • File and symbol counts
+  • Total token usage (for AI context)
+  • Language distribution
+  • Index size and last update
+  • Largest files (--detailed)
+
+${chalk.bold('Use to:')}
+  • Check if index exists
+  • Monitor index freshness
+  • Understand project composition
+  • Track token budget for AI`);
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';

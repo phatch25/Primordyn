@@ -6,6 +6,29 @@ import chalk from 'chalk';
 export const clearCommand = new Command('clear')
   .description('Clear the current index database')
   .option('-f, --force', 'Skip confirmation prompt')
+  .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Remove the entire index database to start fresh. Useful when the index
+  is corrupted or you want to rebuild from scratch.
+
+${chalk.bold('Examples:')}
+  ${chalk.gray('# Clear with confirmation prompt')}
+  $ primordyn clear
+  
+  ${chalk.gray('# Clear without confirmation')}
+  $ primordyn clear --force
+
+${chalk.bold('What it does:')}
+  • Deletes all indexed symbols
+  • Removes all file records
+  • Vacuums database to reclaim space
+  • Requires re-indexing afterward
+
+${chalk.bold('Use when:')}
+  • Index seems corrupted
+  • Major project restructuring
+  • Switching branches significantly
+  • Before archiving project`)
   .action(async (options) => {
     try {
       const db = DatabaseConnectionPool.getConnection();

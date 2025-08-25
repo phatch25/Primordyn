@@ -21,33 +21,37 @@ export function createCLI(): Command {
       subcommandTerm: (cmd) => cmd.name() + ' ' + cmd.usage(),
     })
     .addHelpText('after', `
-${chalk.bold('Examples:')}
-  ${chalk.gray('# Initial setup')}
-  $ primordyn index                     ${chalk.gray('# Index current directory')}
-  $ primordyn stats                     ${chalk.gray('# View index statistics')}
+${chalk.bold('Quick Start:')}
+  ${chalk.gray('# First time setup')}
+  $ primordyn index                     ${chalk.gray('# Build the index')}
+  $ primordyn stats                     ${chalk.gray('# Verify index created')}
+  
+  ${chalk.gray('# Navigate code')}
+  $ primordyn list auth                 ${chalk.gray('# Discover auth-related symbols')}
+  $ primordyn query AuthService         ${chalk.gray('# Navigate to AuthService')}
+  $ primordyn graph AuthService         ${chalk.gray('# See what it depends on')}
 
-  ${chalk.gray('# Discovery workflow')}
-  $ primordyn list "user"               ${chalk.gray('# Search for items containing "user"')}
-  $ primordyn list --type class         ${chalk.gray('# List all classes')}
-  $ primordyn list --languages ts,js    ${chalk.gray('# List TypeScript/JavaScript items')}
+${chalk.bold('Core Commands:')}
+  ${chalk.cyan('index')}   - Build/update the searchable index
+  ${chalk.cyan('list')}    - Discover symbols with fuzzy search
+  ${chalk.cyan('query')}   - Navigate to exact locations
+  ${chalk.cyan('graph')}   - Visualize dependencies
+  ${chalk.cyan('impact')}  - Assess refactoring risk
+  ${chalk.cyan('alias')}   - Create semantic groups
+  ${chalk.cyan('stats')}   - View index statistics
+  ${chalk.cyan('clear')}   - Remove index
 
-  ${chalk.gray('# Targeted retrieval')}
-  $ primordyn query UserService         ${chalk.gray('# Get detailed context for UserService')}
-  $ primordyn query src/auth/login.ts   ${chalk.gray('# Get context for specific file')}
+${chalk.bold('Workflow for AI Assistants:')}
+  1. ${chalk.cyan('primordyn list <term>')} - Discover relevant symbols
+  2. ${chalk.cyan('primordyn query <symbol>')} - Get exact locations
+  3. ${chalk.cyan('primordyn query <symbol> --show-graph')} - Understand relationships
+  4. ${chalk.cyan('primordyn impact <symbol>')} - Check before refactoring
 
-  ${chalk.gray('# Advanced usage')}
-  $ primordyn query UserService --show-graph     ${chalk.gray('# Show dependencies')}
-  $ primordyn query UserService --impact         ${chalk.gray('# Show impact analysis')}
-  $ primordyn list --type endpoint               ${chalk.gray('# List all API endpoints')}
-
-  ${chalk.gray('# Analysis')}
-  $ primordyn graph UserService                 ${chalk.gray('# Visualize dependencies')}
-  $ primordyn impact AuthService                ${chalk.gray('# Analyze change impact')}
-
-${chalk.bold('Workflow:')}
-  1. Use ${chalk.cyan('list')} to discover and search (fuzzy matching, patterns)
-  2. Use ${chalk.cyan('query')} to get detailed context (exact retrieval)
-  3. Use ${chalk.cyan('graph/impact')} for refactoring decisions
+${chalk.bold('Tips:')}
+  • Use aliases for semantic grouping: @auth, @api, @data
+  • Run 'index --update' for incremental updates
+  • Combine list + query for effective exploration
+  • Check impact before major changes
 `);
 
   // Add essential AI-focused commands

@@ -152,24 +152,42 @@ export const listCommand = new Command('list')
     }
   })
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Discover symbols when you don't know exact names. Uses fuzzy matching and
+  semantic aliases to help AI assistants explore unfamiliar codebases.
+
 ${chalk.bold('Examples:')}
   ${chalk.gray('# Fuzzy search for authentication code')}
   $ primordyn list auth
+  ${chalk.gray('→ Finds: authenticate, AuthService, authorization, etc.')}
   
   ${chalk.gray('# Use semantic alias for all auth-related code')}
   $ primordyn list @auth
+  ${chalk.gray('→ Expands to: login, logout, session, token, auth')}
   
-  ${chalk.gray('# Find all classes')}
+  ${chalk.gray('# Find all classes in the codebase')}
   $ primordyn list --type class
   
   ${chalk.gray('# Find API endpoints')}
   $ primordyn list --type endpoint
+  ${chalk.gray('→ Shows: GET /api/users, POST /api/login, etc.')}
   
-  ${chalk.gray('# List everything (browse mode)')}
+  ${chalk.gray('# Browse everything')}
   $ primordyn list
 
 ${chalk.bold('Features:')}
   • Fuzzy matching - finds "UserService" when searching "user srv"
   • Aliases - @auth expands to "login OR logout OR session OR token"
   • Smart grouping - results organized by type
-  • Endpoint detection - special formatting for API routes`);
+  • Endpoint detection - special formatting for API routes
+
+${chalk.bold('How it works:')}
+  1. Exact matches shown first
+  2. Falls back to fuzzy search if no exact matches
+  3. Groups results by type for readability
+  4. Suggests next steps for investigation
+
+${chalk.bold('Tips:')}
+  • Use aliases for semantic grouping (@api, @data, @auth)
+  • Combine with 'query' for detailed navigation
+  • Use --type to filter by symbol type`);

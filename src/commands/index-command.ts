@@ -12,56 +12,51 @@ export const indexCommand = new Command('index')
   .option('--update', 'Update only changed files (incremental)')
   .option('--quiet', 'Minimal output')
   .addHelpText('after', `
-${chalk.bold('Details:')}
-  The index command scans your codebase and extracts symbols (functions, classes,
-  interfaces, types) along with their relationships, creating a searchable database
-  for AI context retrieval.
-
-${chalk.bold('Features:')}
-  • Incremental updates - Only re-indexes changed files
-  • Language-aware parsing - Extracts symbols using AST parsing
-  • Relationship tracking - Maps dependencies and call graphs
-  • Token counting - Tracks context size for AI models
-  • Gitignore respect - Automatically excludes ignored files
+${chalk.bold('Purpose:')}
+  Build a searchable index of your codebase. Extracts symbols, relationships,
+  and call graphs to help AI assistants navigate and understand your code.
 
 ${chalk.bold('Examples:')}
-  ${chalk.gray('# Index current directory')}
+  ${chalk.gray('# Index current directory (first time)')}
   $ primordyn index
+  ${chalk.gray('→ Indexes all supported files, builds symbol database')}
 
+  ${chalk.gray('# Quick incremental update (after changes)')}
+  $ primordyn index --update
+  ${chalk.gray('→ Only re-indexes modified files')}
+
+  ${chalk.gray('# Clear and rebuild from scratch')}
+  $ primordyn index --clear
+
+  ${chalk.gray('# Index only specific languages')}
+  $ primordyn index --languages ts,js
+  
   ${chalk.gray('# Index specific directory')}
   $ primordyn index ./src
 
-  ${chalk.gray('# Clear and rebuild index')}
-  $ primordyn index --clear
+${chalk.bold('Features:')}
+  • Smart incremental updates (--update)
+  • AST-based symbol extraction
+  • Call graph tracking
+  • Token counting for AI
+  • Respects .gitignore
 
-  ${chalk.gray('# Index only TypeScript and JavaScript files')}
-  $ primordyn index --languages ts,js
+${chalk.bold('What gets indexed:')}
+  • Functions, methods, classes
+  • Interfaces, types, structs
+  • API endpoints
+  • Symbol relationships
+  • Import/export chains
 
-  ${chalk.gray('# Index with custom file size limit (2MB)')}
-  $ primordyn index --max-size 2048
+${chalk.bold('Performance tips:')}
+  • Use --update for daily work (faster)
+  • Use --clear when switching branches
+  • Adjust --max-size for large files
+  • Use --languages to focus indexing
 
-  ${chalk.gray('# Quick incremental update')}
-  $ primordyn index --update --quiet
-
-${chalk.bold('Supported Languages:')}
-  • TypeScript (ts, tsx)
-  • JavaScript (js, jsx, mjs)
-  • Python (py)
-  • Go (go)
-  • Rust (rs)
-  • Java (java)
-  • Ruby (rb)
-  • PHP (php)
-  • C/C++ (c, cpp, h, hpp)
-  • C# (cs)
-  • Swift (swift)
-  • Kotlin (kt)
-
-${chalk.bold('Notes:')}
-  • Index is stored in .primordyn/context.db
-  • Use --update for faster incremental updates
-  • Large files over the size limit are skipped
-  • Binary files and dependencies (node_modules) are ignored`)
+${chalk.bold('Supported languages:')}
+  TypeScript, JavaScript, Python, Go, Rust, Java,
+  Ruby, PHP, C/C++, C#, Swift, Kotlin, and more`)
   .action(async (path: string, options) => {
     try {
       const projectPath = path === '.' ? process.cwd() : path;

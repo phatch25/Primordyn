@@ -12,23 +12,40 @@ export const queryCommand = new Command('query')
   .option('--impact', 'Show files affected by changes')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Navigate to symbol definitions and understand code relationships without
+  pulling full implementations. Designed for AI assistants to quickly locate
+  and understand code structure.
+
 ${chalk.bold('Examples:')}
   ${chalk.gray('# Find where a symbol is defined')}
   $ primordyn query UserService
+  ${chalk.gray('→ Shows: src/services/UserService.ts:15')}
   
-  ${chalk.gray('# Show dependency graph')}
-  $ primordyn query UserService --show-graph
+  ${chalk.gray('# Show what calls it and what it calls')}
+  $ primordyn query processData --show-graph
+  ${chalk.gray('→ Shows call hierarchy in both directions')}
   
-  ${chalk.gray('# Show impact of changes')}
+  ${chalk.gray('# See what breaks if you change something')}
   $ primordyn query AuthService --impact
+  ${chalk.gray('→ Lists all files that reference this symbol')}
   
-  ${chalk.gray('# Get JSON output')}
-  $ primordyn query UserService --format json
+  ${chalk.gray('# Get machine-readable output')}
+  $ primordyn query Database --format json
+  
+  ${chalk.gray('# Find specific symbol types')}
+  $ primordyn query render --type function
+
+${chalk.bold('What it shows:')}
+  • Exact file:line location of definitions
+  • Direct callers and callees (--show-graph)
+  • All files referencing the symbol (--impact)
+  • No code dumps, just navigation info
 
 ${chalk.bold('Tips:')}
-  • Returns file:line locations for easy navigation
-  • Use --show-graph to understand dependencies
-  • Use --impact to assess refactoring risk`)
+  • Use exact symbol names for best results
+  • Combine with 'list' command for discovery
+  • Use --impact before refactoring`)
   .action(async (searchTerm: string, options: any) => {
     try {
       const validatedSearchTerm = validateSearchTerm(searchTerm);

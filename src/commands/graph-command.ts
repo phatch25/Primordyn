@@ -152,24 +152,46 @@ export const graphCommand = new Command('graph')
     }
   })
   .addHelpText('after', `
+${chalk.bold('Purpose:')}
+  Visualize how code is connected. Shows what a symbol calls (dependencies)
+  or what calls it (dependents) in an easy-to-read tree format.
+
 ${chalk.bold('Examples:')}
   ${chalk.gray('# Show what UserService depends on')}
   $ primordyn graph UserService
+  ${chalk.gray('→ Tree showing: UserService calls Database, Logger, AuthService...')}
   
   ${chalk.gray('# Show what depends on UserService')}
   $ primordyn graph UserService --reverse
+  ${chalk.gray('→ Tree showing: UserController, AdminPanel call UserService...')}
   
-  ${chalk.gray('# Limit depth for large graphs')}
+  ${chalk.gray('# Limit depth for focused view')}
   $ primordyn graph DatabaseConnection --depth 2
 
-${chalk.bold('Output:')}
-  Creates an ASCII tree showing dependencies.
-  Each node shows the symbol name and file location.
-  
+${chalk.bold('Output format:')}
+  UserService
+  ├── 𝑓 validateUser
+  │   src/validators/user.ts:15
+  ├── ◆ Database
+  │   src/database/index.ts:10
+  │   └── 𝑚 connect
+  │       src/database/connection.ts:25
+  └── ... 5 more
+
+${chalk.bold('Icons:')}
+  𝑓 = function, 𝑚 = method, ◆ = class
+  ◇ = interface, 𝑡 = type
+
 ${chalk.bold('Use cases:')}
-  • Understand code structure before refactoring
-  • Find circular dependencies (shown as truncated branches)
-  • Identify highly coupled components`);
+  • Understand dependencies before refactoring
+  • Find what will break if you change something
+  • Identify tightly coupled code
+  • Trace execution flow
+
+${chalk.bold('Tips:')}
+  • Default shows dependencies (what this uses)
+  • Use --reverse to see dependents (what uses this)
+  • Adjust --depth for larger/smaller trees`);
 
 function getTypeIcon(type: string): string {
   const icons: Record<string, string> = {
