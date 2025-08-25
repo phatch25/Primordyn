@@ -63,6 +63,9 @@ export class Indexer {
         }
       }
 
+      // Post-processing: resolve call graph references now that all symbols are indexed
+      this.resolveCallGraphReferences();
+      
       stats.timeElapsed = Date.now() - startTime;
 
       if (spinner) {
@@ -200,26 +203,47 @@ export class Indexer {
             let calleeSymbolId: number | null = null;
             let calleeFileId: number | null = null;
             
+            // Handle method calls (e.g., "object.method")
+            const isMethodCall = call.calleeName.includes('.');
+            const symbolName = isMethodCall ? call.calleeName.split('.').pop()! : call.calleeName;
+            
             // First check if it's a local symbol in the same file
             const localCallee = database.prepare(
               'SELECT id FROM symbols WHERE file_id = ? AND name = ?'
-            ).get(fileId, call.calleeName.split('.').pop()) as { id: number } | undefined;
+            ).get(fileId, symbolName) as { id: number } | undefined;
             
             if (localCallee) {
               calleeSymbolId = localCallee.id;
               calleeFileId = fileId;
             } else if (!call.isExternal) {
-              // Try to find it in other files (global search)
-              const globalCallee = database.prepare(`
-                SELECT s.id as symbol_id, s.file_id 
-                FROM symbols s 
-                WHERE s.name = ? 
-                LIMIT 1
-              `).get(call.calleeName.split('.').pop()) as { symbol_id: number; file_id: number } | undefined;
-              
-              if (globalCallee) {
-                calleeSymbolId = globalCallee.symbol_id;
-                calleeFileId = globalCallee.file_id;
+              // For classes/constructors/instantiations, search by exact name
+              if (call.callType === 'constructor' || call.callType === 'instantiation') {
+                const classSymbol = database.prepare(`
+                  SELECT s.id as symbol_id, s.file_id 
+                  FROM symbols s 
+                  WHERE s.name = ? AND s.type = 'class'
+                  LIMIT 1
+                `).get(call.calleeName) as { symbol_id: number; file_id: number } | undefined;
+                
+                if (classSymbol) {
+                  calleeSymbolId = classSymbol.symbol_id;
+                  calleeFileId = classSymbol.file_id;
+                } else if (process.env.DEBUG) {
+                  console.log(`Failed to find class ${call.calleeName} for ${call.callType}`);
+                }
+              } else {
+                // Try to find it in other files (global search)
+                const globalCallee = database.prepare(`
+                  SELECT s.id as symbol_id, s.file_id 
+                  FROM symbols s 
+                  WHERE s.name = ? 
+                  LIMIT 1
+                `).get(symbolName) as { symbol_id: number; file_id: number } | undefined;
+                
+                if (globalCallee) {
+                  calleeSymbolId = globalCallee.symbol_id;
+                  calleeFileId = globalCallee.file_id;
+                }
               }
             }
 
@@ -274,6 +298,59 @@ export class Indexer {
     }
   }
 
+  private resolveCallGraphReferences(): void {
+    const database = this.db.getDatabase();
+    
+    // Update call graph entries where callee_symbol_id is null but we can now resolve it
+    const updateStmt = database.prepare(`
+      UPDATE call_graph 
+      SET callee_symbol_id = ?, callee_file_id = ?
+      WHERE id = ?
+    `);
+    
+    // Find unresolved calls
+    const unresolvedCalls = database.prepare(`
+      SELECT id, callee_name, call_type 
+      FROM call_graph 
+      WHERE callee_symbol_id IS NULL 
+        AND callee_name NOT LIKE '%.%'
+        AND call_type IN ('instantiation', 'constructor', 'function')
+    `).all() as Array<{id: number; callee_name: string; call_type: string}>;
+    
+    let resolved = 0;
+    for (const call of unresolvedCalls) {
+      // Try to resolve the symbol
+      let symbol = null;
+      
+      if (call.call_type === 'instantiation' || call.call_type === 'constructor') {
+        // Look for a class with this name
+        symbol = database.prepare(`
+          SELECT id, file_id 
+          FROM symbols 
+          WHERE name = ? AND type = 'class'
+          LIMIT 1
+        `).get(call.callee_name) as {id: number; file_id: number} | undefined;
+      } else {
+        // Look for any symbol with this name
+        symbol = database.prepare(`
+          SELECT id, file_id 
+          FROM symbols 
+          WHERE name = ?
+          LIMIT 1
+        `).get(call.callee_name) as {id: number; file_id: number} | undefined;
+      }
+      
+      if (symbol) {
+        updateStmt.run(symbol.id, symbol.file_id, call.id);
+        resolved++;
+      }
+    }
+    
+    if (resolved > 0 && process.env.DEBUG) {
+      console.log(`Resolved ${resolved} call graph references`);
+    }
+  }
+  
   public async getIndexStats(): Promise<{
     totalFiles: number;
     totalSymbols: number;
