@@ -21,18 +21,60 @@ export const queryCommand = new Command('query')
   .option('--type <symbol-type>', 'Filter by symbol type: function,class,interface,method,etc')
   .option('--refresh', 'Force refresh of index before query')
   .addHelpText('after', `
-Examples:
-  $ primordyn query UserService          # Get detailed context for UserService
-  $ primordyn query "Database.connect"   # Query specific method
-  $ primordyn query src/auth/login.ts    # Get context for a file
+${chalk.bold('Details:')}
+  The query command retrieves detailed context about specific symbols or files,
+  optimized for AI consumption. It provides exact matches with full implementation
+  details, dependencies, and relationships.
+
+${chalk.bold('Features:')}
+  • Symbol-aware retrieval - Gets complete context for functions, classes, methods
+  • Dependency tracking - Shows what the symbol uses and what uses it
+  • Impact analysis - Identifies affected code if you change this symbol
+  • Git integration - Shows recent changes and authorship
+  • Token management - Respects AI model context limits
+  • Multiple formats - AI-optimized, JSON, or human-readable output
+
+${chalk.bold('Examples:')}
+  ${chalk.gray('# Get context for a class')}
+  $ primordyn query UserService
   
-  $ primordyn query UserService --show-graph      # Show dependency graph
-  $ primordyn query UserService --impact          # Show impact analysis
-  $ primordyn query UserService --include-callers # Include usage locations
-  $ primordyn query UserService --recent 7        # Show recent changes
+  ${chalk.gray('# Query a specific method')}
+  $ primordyn query "Database.connect"
   
-Note: Use 'list' command first to discover available symbols
-`)
+  ${chalk.gray('# Get context for a file')}
+  $ primordyn query src/auth/login.ts
+  
+  ${chalk.gray('# Show dependency graph')}
+  $ primordyn query UserService --show-graph
+  
+  ${chalk.gray('# Analyze change impact')}
+  $ primordyn query AuthService --impact
+  
+  ${chalk.gray('# Include usage locations')}
+  $ primordyn query Logger --include-callers
+  
+  ${chalk.gray('# Show recent changes (last 14 days)')}
+  $ primordyn query UserService --recent 14
+  
+  ${chalk.gray('# Get JSON output for tools')}
+  $ primordyn query UserService --format json
+  
+  ${chalk.gray('# Limit context size for smaller models')}
+  $ primordyn query UserService --tokens 4000
+  
+  ${chalk.gray('# Filter by symbol type')}
+  $ primordyn query render --type function
+
+${chalk.bold('Output Formats:')}
+  • ${chalk.cyan('ai')} (default) - Optimized for AI models with markdown formatting
+  • ${chalk.cyan('json')} - Structured data for programmatic use
+  • ${chalk.cyan('human')} - Readable format with syntax highlighting
+
+${chalk.bold('Notes:')}
+  • Use 'list' command first to discover available symbols
+  • Query uses exact matching - for fuzzy search use 'list'
+  • Token limit includes all context and dependencies
+  • Impact analysis helps identify refactoring risks`)
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
       // Validate inputs

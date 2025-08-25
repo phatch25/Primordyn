@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { PatternMatcher, ExtractedPatterns } from '../utils/pattern-matcher.js';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface SimilarSymbol {
   name: string;
@@ -24,6 +25,7 @@ export const patternsCommand =
     .option('--pattern <pattern>', 'Search for specific pattern (e.g., "constructor", "async", "crud:*")')
     .option('--category <category>', 'Focus on pattern category: structural, signature, behavioral, semantic')
     .option('--verbose', 'Show detailed pattern analysis')
+    .addHelpText('after', getHelpText('patterns'))
     .action(async (symbolName: string, options) => {
       const spinner = ora('Analyzing code patterns...').start();
       

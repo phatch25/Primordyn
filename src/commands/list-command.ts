@@ -5,6 +5,7 @@ import { validateLanguages, validateTokenLimit, ValidationError } from '../utils
 import { AliasManager } from '../config/aliases.js';
 import chalk from 'chalk';
 import { SymbolResult, FileResult } from '../types/index.js';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface ListCommandOptions {
   languages?: string;
@@ -35,15 +36,7 @@ export const listCommand = new Command('list')
   .option('--detailed', 'Show detailed information for each match')
   .option('--use-alias', 'Enable alias expansion for search pattern')
   .option('--format <type>', 'Output format: human, json, simple (default: human)', 'human')
-  .addHelpText('after', `
-Examples:
-  $ primordyn list                      # List all symbols and files
-  $ primordyn list "user"                # Search for items containing "user"
-  $ primordyn list --type function       # List all functions
-  $ primordyn list --show-files          # Include file listings
-  $ primordyn list "auth" --detailed     # Detailed view of auth-related items
-  $ primordyn list --format json         # Machine-readable output
-`)
+  .addHelpText('after', getHelpText('list'))
   .action(async (searchPattern: string | undefined, options: ListCommandOptions) => {
     try {
       const db = DatabaseConnectionPool.getConnection();

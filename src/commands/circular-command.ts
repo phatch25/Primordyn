@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface CircularChain {
   symbols: Array<{
@@ -18,6 +19,7 @@ export const circularCommand =
     .option('--max-depth <number>', 'Maximum depth to search for cycles (default: 10)', parseInt, 10)
     .option('--show-all', 'Show all circular dependencies (not just unique cycles)')
     .option('--by-file', 'Group circular dependencies by file instead of by symbol')
+    .addHelpText('after', getHelpText('circular'))
     .action(async (options) => {
       const spinner = ora('Detecting circular dependencies...').start();
       

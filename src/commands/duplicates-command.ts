@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { createHash } from 'crypto';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface DuplicateGroup {
   hash: string;
@@ -26,6 +27,7 @@ export const duplicatesCommand =
     .option('-t, --type <type>', 'Filter by symbol type (function, class, etc.)')
     .option('--show-content', 'Show the duplicated code content')
     .option('--ignore-tests', 'Ignore test files')
+    .addHelpText('after', getHelpText('duplicates'))
     .action(async (options) => {
       const spinner = ora('Analyzing codebase for duplicate code...').start();
       

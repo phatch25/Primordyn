@@ -2,11 +2,13 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
+import { getHelpText } from '../utils/help-texts.js';
 
 export const statsCommand = new Command('stats')
   .description('Show index status and project overview')
   .option('--json', 'Output JSON for AI agents')
   .option('--detailed', 'Show detailed breakdown')
+  .addHelpText('after', getHelpText('stats'))
   .action(async (options) => {
     try {
       const db = new PrimordynDB();

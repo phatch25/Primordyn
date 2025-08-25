@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { validateSearchTerm, ValidationError } from '../utils/validation.js';
 import chalk from 'chalk';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface EndpointInfo {
   method: string;
@@ -16,6 +17,7 @@ export const endpointsCommand = new Command('endpoints')
   .argument('[search-term]', 'Optional search term to filter endpoints')
   .option('--format <type>', 'Output format: ai, json, human (default: ai)', 'ai')
   .option('--group-by <type>', 'Group by: file, method, path (default: file)', 'file')
+  .addHelpText('after', getHelpText('endpoints'))
   .action(async (searchTerm: string | undefined, options: any) => {
     try {
       const db = DatabaseConnectionPool.getConnection();

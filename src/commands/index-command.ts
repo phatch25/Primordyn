@@ -11,6 +11,57 @@ export const indexCommand = new Command('index')
   .option('--max-size <kb>', 'Maximum file size in KB (default: 1024)', '1024')
   .option('--update', 'Update only changed files (incremental)')
   .option('--quiet', 'Minimal output')
+  .addHelpText('after', `
+${chalk.bold('Details:')}
+  The index command scans your codebase and extracts symbols (functions, classes,
+  interfaces, types) along with their relationships, creating a searchable database
+  for AI context retrieval.
+
+${chalk.bold('Features:')}
+  • Incremental updates - Only re-indexes changed files
+  • Language-aware parsing - Extracts symbols using AST parsing
+  • Relationship tracking - Maps dependencies and call graphs
+  • Token counting - Tracks context size for AI models
+  • Gitignore respect - Automatically excludes ignored files
+
+${chalk.bold('Examples:')}
+  ${chalk.gray('# Index current directory')}
+  $ primordyn index
+
+  ${chalk.gray('# Index specific directory')}
+  $ primordyn index ./src
+
+  ${chalk.gray('# Clear and rebuild index')}
+  $ primordyn index --clear
+
+  ${chalk.gray('# Index only TypeScript and JavaScript files')}
+  $ primordyn index --languages ts,js
+
+  ${chalk.gray('# Index with custom file size limit (2MB)')}
+  $ primordyn index --max-size 2048
+
+  ${chalk.gray('# Quick incremental update')}
+  $ primordyn index --update --quiet
+
+${chalk.bold('Supported Languages:')}
+  • TypeScript (ts, tsx)
+  • JavaScript (js, jsx, mjs)
+  • Python (py)
+  • Go (go)
+  • Rust (rs)
+  • Java (java)
+  • Ruby (rb)
+  • PHP (php)
+  • C/C++ (c, cpp, h, hpp)
+  • C# (cs)
+  • Swift (swift)
+  • Kotlin (kt)
+
+${chalk.bold('Notes:')}
+  • Index is stored in .primordyn/context.db
+  • Use --update for faster incremental updates
+  • Large files over the size limit are skipped
+  • Binary files and dependencies (node_modules) are ignored`)
   .action(async (path: string, options) => {
     try {
       const projectPath = path === '.' ? process.cwd() : path;

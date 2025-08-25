@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { getHelpText } from '../utils/help-texts.js';
 
 function getSymbolIcon(type: string): string {
   const icons: Record<string, string> = {
@@ -31,6 +32,7 @@ export const unusedCommand =
     .option('--ignore <patterns...>', 'Custom patterns to ignore (e.g., "stories" "mock")')
     .option('--strict', 'Use strict mode (fewer exclusions, may have more false positives)')
     .option('--format <type>', 'Output format: text, json, markdown (default: text)', 'text')
+    .addHelpText('after', getHelpText('unused'))
     .action(async (options) => {
       const spinner = ora('Analyzing codebase for unused symbols...').start();
       

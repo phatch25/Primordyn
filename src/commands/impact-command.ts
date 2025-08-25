@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface ImpactNode {
   symbol_name: string;
@@ -21,6 +22,7 @@ export const impactCommand =
     .option('--show-path', 'Show the dependency path for each affected symbol')
     .option('--suggest-order', 'Suggest migration order based on risk')
     .option('--format <type>', 'Output format: text, json, tree (default: text)', 'text')
+    .addHelpText('after', getHelpText('impact'))
     .action(async (symbolName: string, options) => {
       const spinner = ora('Analyzing change impact...').start();
       

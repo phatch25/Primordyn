@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { getHelpText } from '../utils/help-texts.js';
 
 interface GraphNode {
   name: string;
@@ -26,6 +27,7 @@ export const graphCommand =
     .option('--show-signatures', 'Include function/method signatures in the graph')
     .option('--no-colors', 'Disable colored output')
     .option('--layout <type>', 'Tree layout: tree, flat (default: tree)', 'tree')
+    .addHelpText('after', getHelpText('graph'))
     .action(async (symbolName: string, options) => {
       const spinner = ora('Building dependency graph...').start();
       

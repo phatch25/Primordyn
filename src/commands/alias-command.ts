@@ -1,9 +1,11 @@
 import { Command } from 'commander';
 import { AliasManager } from '../config/aliases.js';
 import chalk from 'chalk';
+import { getHelpText } from '../utils/help-texts.js';
 
 export const aliasCommand = new Command('alias')
   .description('Manage search aliases for semantic queries')
+  .addHelpText('after', getHelpText('alias'))
   .action(async () => {
     // List all aliases when no subcommand provided
     const aliasManager = new AliasManager(process.cwd());
