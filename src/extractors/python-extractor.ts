@@ -1,8 +1,15 @@
 import { BaseExtractor } from './base.js';
+import { EndpointDetector } from './endpoint-detector.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
 import type { StructureCategory, SymbolDetail } from './types.js';
 
 export class PythonExtractor extends BaseExtractor {
+  private endpointDetector: EndpointDetector;
+  
+  constructor() {
+    super();
+    this.endpointDetector = new EndpointDetector();
+  }
   getSupportedLanguages(): string[] {
     return ['python'];
   }
@@ -28,6 +35,9 @@ export class PythonExtractor extends BaseExtractor {
       structure: {}
     };
     
+    // Extract decorators first (they need to be available for function extraction)
+    this.extractDecoratorsAsSymbols(context.symbols);
+    
     // Extract functions and methods
     this.extractFunctions(context.symbols);
     
@@ -49,12 +59,34 @@ export class PythonExtractor extends BaseExtractor {
     // Build structure
     context.structure = this.buildStructure(context.symbols);
     
+    // Detect API endpoints
+    const endpoints = this.endpointDetector.detectEndpoints(this.content, fileInfo.path);
+    
+    // Merge endpoints with existing symbols, avoiding duplicates
+    const existingLines = new Set(context.symbols.map(s => `${s.lineStart}-${s.name}`));
+    for (const endpoint of endpoints) {
+      const key = `${endpoint.lineStart}-${endpoint.name}`;
+      if (!existingLines.has(key)) {
+        context.symbols.push(endpoint);
+      }
+    }
+    
+    // Mark existing functions/methods as endpoints if they match patterns
+    for (const symbol of context.symbols) {
+      if (symbol.type === 'function' || symbol.type === 'method') {
+        if (this.endpointDetector.isLikelyEndpoint(symbol)) {
+          symbol.metadata = { ...symbol.metadata, isEndpoint: true };
+        }
+      }
+    }
+    
     return context;
   }
   
   private extractFunctions(symbols: Symbol[]): void {
     // Match regular functions and async functions
-    const functionPattern = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*([^:]+))?\s*:/gm;
+    // Updated pattern to handle nested parentheses in parameters like Form(...) or Depends(...)
+    const functionPattern = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*(?:->\s*([^:]+))?\s*:/gm;
     
     let match;
     while ((match = functionPattern.exec(this.content)) !== null) {
@@ -67,11 +99,15 @@ export class PythonExtractor extends BaseExtractor {
       
       const isAsync = match[0].includes('async');
       const isMethod = indent > 0 && this.isInsideClass(lineStart);
+      const decorators = this.extractDecorators(lineStart);
       const signature = `${isAsync ? 'async ' : ''}def ${name}(${params})${returnType ? ' -> ' + returnType : ''}`;
+      
+      // Determine if this is an endpoint (has route decorators)
+      const isEndpoint = this.hasEndpointDecorator(decorators);
       
       symbols.push({
         name,
-        type: isMethod ? 'method' : 'function',
+        type: isEndpoint ? 'endpoint' : (isMethod ? 'method' : 'function'),
         lineStart,
         lineEnd,
         signature,
@@ -79,8 +115,9 @@ export class PythonExtractor extends BaseExtractor {
           async: isAsync,
           params: this.parseParams(params),
           returnType: returnType.trim(),
-          decorators: this.extractDecorators(lineStart),
-          indent
+          decorators,
+          indent,
+          isEndpoint
         }
       });
     }
@@ -340,11 +377,71 @@ export class PythonExtractor extends BaseExtractor {
     return keywords.has(word);
   }
   
+  private extractDecoratorsAsSymbols(symbols: Symbol[]): void {
+    // Extract decorators as separate symbols for better searchability
+    const decoratorPattern = /^(\s*)@([\w.]+)(?:\(([^)]*)\))?\s*$/gm;
+    
+    let match;
+    while ((match = decoratorPattern.exec(this.content)) !== null) {
+      const indent = match[1].length;
+      const fullName = match[2];
+      const args = match[3] || '';
+      const lineNumber = this.getLineNumber(match.index);
+      
+      // Create a symbol for the decorator
+      symbols.push({
+        name: `@${fullName}`,
+        type: 'decorator',
+        lineStart: lineNumber,
+        lineEnd: lineNumber,
+        signature: `@${fullName}${args ? `(${args})` : ''}`,
+        metadata: {
+          fullName,
+          args,
+          indent,
+          decoratorType: this.getDecoratorType(fullName)
+        }
+      });
+    }
+  }
+  
+  private getDecoratorType(decoratorName: string): string {
+    // Identify common decorator types
+    const routeDecorators = ['router.get', 'router.post', 'router.put', 'router.delete', 'router.patch', 'app.get', 'app.post', 'app.put', 'app.delete', 'app.patch', 'route'];
+    const middlewareDecorators = ['middleware', 'before_request', 'after_request', 'depends'];
+    
+    const lowerName = decoratorName.toLowerCase();
+    
+    if (routeDecorators.some(d => lowerName.includes(d))) {
+      return 'route';
+    }
+    if (middlewareDecorators.some(d => lowerName.includes(d))) {
+      return 'middleware';
+    }
+    
+    return 'general';
+  }
+  
+  private hasEndpointDecorator(decorators: string[]): boolean {
+    // Check if any decorator is a route decorator
+    const routePatterns = [
+      /@(router|app)\.(get|post|put|delete|patch|head|options)/i,
+      /@route\(/i,
+      /@(get|post|put|delete|patch)\(/i
+    ];
+    
+    return decorators.some(decorator => 
+      routePatterns.some(pattern => pattern.test(decorator))
+    );
+  }
+  
   private buildStructure(symbols: Symbol[]): StructureCategory {
     const structure: StructureCategory = {
       functions: [],
       classes: [],
-      methods: []
+      methods: [],
+      decorators: [],
+      endpoints: []
     };
     
     symbols.forEach(symbol => {
@@ -363,6 +460,12 @@ export class PythonExtractor extends BaseExtractor {
           break;
         case 'method':
           structure.methods.push(detail);
+          break;
+        case 'decorator':
+          structure.decorators?.push(detail);
+          break;
+        case 'endpoint':
+          structure.endpoints?.push(detail);
           break;
       }
     });

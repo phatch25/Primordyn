@@ -12,9 +12,11 @@ Primordyn indexes your codebase and provides intelligent context retrieval optim
 
 ## Features
 
+- **⚡ Blazing Fast** - Optimized for sub-second query performance
 - **Smart Symbol Resolution** - Find any function, class, or type with full context
 - **Fuzzy Search** - Typo-tolerant search that finds what you meant
 - **Symbol Type Filtering** - Search for specific types (classes, interfaces, functions)
+- **Framework Patterns** - Recognizes decorators (@router.post), endpoints, middleware
 - **Usage Tracking** - See where symbols are defined and used
 - **Git Integration** - View blame, history, and recent changes
 - **Impact Analysis** - Understand refactoring risks before making changes
@@ -33,10 +35,7 @@ npm install -g primordyn@alpha
 ## Quick Start
 
 ```bash
-# Index your codebase
-primordyn index
-
-# Find a symbol with full context
+# Just start querying! (auto-indexes on first use)
 primordyn query "YourClassName"
 
 # Show dependencies and relationships
@@ -44,6 +43,45 @@ primordyn query "functionName" --show-graph
 
 # Get project statistics
 primordyn stats
+
+# Refresh index when files change
+primordyn index
+```
+
+### ⚡ Performance
+
+Primordyn is optimized for speed. Queries typically complete in under a second.
+
+```bash
+# Standard query (fast)
+primordyn query "MyClass"
+
+# Force index refresh if needed
+primordyn query "MyClass" --refresh
+
+# Use search aliases (may impact performance)
+primordyn query "api" --use-alias
+
+# See verbose output
+PRIMORDYN_VERBOSE=true primordyn query "MyClass"
+```
+
+## Workflow
+
+The recommended workflow separates discovery from retrieval:
+
+1. **Discovery**: Use `list` to search and explore the codebase
+2. **Retrieval**: Use `query` to get detailed context for specific items
+
+```bash
+# Step 1: Discover what's available
+primordyn list "auth"              # Search for auth-related items
+primordyn list --type class        # List all classes
+primordyn list --show-files         # Browse files
+
+# Step 2: Get detailed context
+primordyn query AuthService         # Get full context for AuthService
+primordyn query AuthService --impact # Analyze refactoring impact
 ```
 
 ## Commands
@@ -57,9 +95,23 @@ primordyn index                    # Index current directory
 primordyn index /path/to/project   # Index specific path
 ```
 
-### `primordyn query <search-term>`
+### `primordyn list [search-pattern]`
 
-Search for symbols, functions, classes, and their relationships.
+List and search symbols, files, and patterns across the codebase.
+
+```bash
+# Browse and search
+primordyn list                     # List all symbols
+primordyn list "user"               # Search for "user" (fuzzy matching)
+primordyn list --type function      # List all functions
+primordyn list --languages ts,js    # Filter by language
+primordyn list --show-files          # Include file listings
+primordyn list --detailed            # Show detailed information
+```
+
+### `primordyn query <target>`
+
+Get detailed context for a specific symbol or file (exact match).
 
 ```bash
 # Basic search
@@ -92,9 +144,9 @@ primordyn query "databse"  # Will find "database"
 ```
 
 **Options:**
-- `--tokens <max>` - Maximum tokens in response (default: 8000)
+- `--tokens <max>` - Maximum tokens in response (default: 16000)
 - `--format <type>` - Output format: `ai`, `json`, `human` (default: ai)
-- `--type <symbol-type>` - Filter by symbol type (e.g., class, interface, function)
+- `--type <symbol-type>` - Filter by symbol type (e.g., class, interface, function, endpoint, decorator)
 - `--show-graph` - Show dependency relationships
 - `--include-callers` - Include all files that use this symbol
 - `--impact` - Show refactoring impact analysis
@@ -102,6 +154,7 @@ primordyn query "databse"  # Will find "database"
 - `--blame` - Show git blame information
 - `--recent <days>` - Show commits from last N days (default: 7)
 - `--depth <n>` - Depth of context expansion (default: 1)
+- `--no-refresh` - Skip auto-refresh of index (use existing index as-is)
 
 ### `primordyn stats`
 

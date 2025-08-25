@@ -2,11 +2,13 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
+import { getHelpText } from '../utils/help-texts.js';
 
 export const statsCommand = new Command('stats')
   .description('Show index status and project overview')
   .option('--json', 'Output JSON for AI agents')
   .option('--detailed', 'Show detailed breakdown')
+  .addHelpText('after', getHelpText('stats'))
   .action(async (options) => {
     try {
       const db = new PrimordynDB();
@@ -31,7 +33,7 @@ export const statsCommand = new Command('stats')
       
       // Text output
       console.log(chalk.blue('📊 Primordyn Index Statistics'));
-      console.log(chalk.gray('━'.repeat(50)));
+      console.log(chalk.gray('═'.repeat(50)));
       
       if (dbInfo.fileCount === 0) {
         console.log(chalk.yellow('No files indexed yet.'));
@@ -101,9 +103,9 @@ export const statsCommand = new Command('stats')
       // Quick tips
       console.log(chalk.green('\n💡 Quick Tips:'));
       console.log(`  • Search: ${chalk.cyan('primordyn query "search term"')}`);
-      console.log(`  • Symbol type filter: ${chalk.cyan('primordyn query "search" --type class')}`);
+      console.log(`  • Type filters: ${chalk.cyan('--type function|class|endpoint|decorator')}`);
       console.log(`  • Show impact: ${chalk.cyan('primordyn query "functionName" --impact')}`);
-      console.log(`  • Update index: ${chalk.cyan('primordyn index --update')}`);
+      console.log(`  • Skip refresh: ${chalk.cyan('primordyn query "term" --no-refresh')}`);
       
       db.close();
       

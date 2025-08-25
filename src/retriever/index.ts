@@ -1,6 +1,7 @@
 import { PrimordynDB } from '../database/index.js';
 import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import { GitAnalyzer } from '../git/analyzer.js';
+import { LRUCache } from '../utils/lru-cache.js';
 import Fuse from 'fuse.js';
 import type { 
   QueryOptions, QueryResult, FileResult, SymbolResult, 
@@ -14,15 +15,32 @@ export class ContextRetriever {
   private db: PrimordynDB;
   private tokenEncoder: Tiktoken;
   private gitAnalyzer: GitAnalyzer;
+  private queryCache: LRUCache<QueryResult>;
+  private symbolCache: LRUCache<SymbolResult[]>;
+  private fileCache: LRUCache<FileResult>;
 
   constructor(db: PrimordynDB) {
     this.db = db;
     // Use GPT-4 encoder as it's similar to Claude's tokenization
     this.tokenEncoder = encodingForModel('gpt-4');
     this.gitAnalyzer = new GitAnalyzer();
+    
+    // Initialize caches with 30 second TTL
+    this.queryCache = new LRUCache<QueryResult>(100, 30);
+    this.symbolCache = new LRUCache<SymbolResult[]>(200, 30);
+    this.fileCache = new LRUCache<FileResult>(100, 30);
   }
 
   public async query(searchTerm: string, options: QueryOptions = {}): Promise<QueryResult> {
+    // Generate cache key
+    const cacheKey = `query:${searchTerm}:${JSON.stringify(options)}`;
+    
+    // Check cache first
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
     const maxTokens = options.maxTokens || 4000;
     const database = this.db.getDatabase();
 
@@ -56,19 +74,52 @@ export class ContextRetriever {
         const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
         symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
       } else {
-        // Fall back to LIKE queries for special characters
+        // Fall back to LIKE queries for special characters or OR queries
         const fileQuery = this.buildFileLikeQuery(searchTerm, options);
-        const params = [`%${searchTerm}%`, `%${searchTerm}%`];
+        
+        // Build params based on whether it's an OR query
+        const params: string[] = [];
+        if (searchTerm.includes(' OR ')) {
+          const terms = searchTerm.split(/\s+OR\s+/i);
+          terms.forEach(term => {
+            params.push(`%${term.trim()}%`, `%${term.trim()}%`);
+          });
+        } else {
+          params.push(`%${searchTerm}%`, `%${searchTerm}%`);
+        }
+        
         if (options.fileTypes?.length) {
           params.push(...options.fileTypes);
         }
         files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
         
         const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
-        const symbolParams = [`%${searchTerm}%`, `%${searchTerm}%`];
+        const symbolParams: string[] = [];
+        
+        // Build symbol params based on whether it's an OR query
+        if (searchTerm.includes(' OR ')) {
+          const terms = searchTerm.split(/\s+OR\s+/i);
+          terms.forEach(term => {
+            symbolParams.push(`%${term.trim()}%`, `%${term.trim()}%`, `%${term.trim()}%`);
+          });
+        } else {
+          symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
+        }
+        
         if (options.fileTypes?.length) {
           symbolParams.push(...options.fileTypes);
         }
+        
+        // Add parameters for ORDER BY (only for non-OR queries)
+        if (!searchTerm.includes(' OR ')) {
+          const hasMultipleWords = searchTerm.trim().split(/\s+/).length > 1;
+          if (hasMultipleWords) {
+            symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`);
+          } else {
+            symbolParams.push(searchTerm, `%${searchTerm}%`);
+          }
+        }
+        
         symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
       }
     }
@@ -130,6 +181,9 @@ export class ContextRetriever {
       result.totalTokens += symbolTokens;
     }
 
+    // Cache the result before returning
+    this.queryCache.set(cacheKey, result);
+    
     return result;
   }
 
@@ -338,6 +392,13 @@ export class ContextRetriever {
   }
   
   public async findSymbol(symbolName: string, options: QueryOptions = {}): Promise<SymbolResult[]> {
+    // Check cache first
+    const cacheKey = `symbol:${symbolName}:${JSON.stringify(options)}`;
+    const cached = this.symbolCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
     const database = this.db.getDatabase();
 
     // Check if we can use FTS5 or need to fall back to LIKE
@@ -408,7 +469,12 @@ export class ContextRetriever {
       symbols = database.prepare(query).all(...params) as SymbolQueryRow[];
     }
 
-    return symbols.map(symbol => this.processSymbolResult(symbol));
+    const results = symbols.map(symbol => this.processSymbolResult(symbol));
+    
+    // Cache the results
+    this.symbolCache.set(cacheKey, results);
+    
+    return results;
   }
 
   public async searchFullText(query: string, options: QueryOptions = {}): Promise<QueryResult> {
@@ -508,13 +574,13 @@ export class ContextRetriever {
           f.content as fileContent
         FROM symbols s
         JOIN files f ON s.file_id = f.id
-        WHERE (s.name LIKE ? OR s.signature LIKE ?)
+        WHERE (s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)
         ${options.fileTypes?.length ? `AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})` : ''}
         ORDER BY LENGTH(s.name)
         LIMIT 20
       `;
 
-      symbols = database.prepare(symbolQuery).all(`%${query}%`, `%${query}%`) as SymbolQueryRow[];
+      symbols = database.prepare(symbolQuery).all(`%${query}%`, `%${query}%`, `%${query}%`) as SymbolQueryRow[];
     }
 
     // Process results
@@ -668,13 +734,32 @@ export class ContextRetriever {
       signature: symbol.signature || undefined
     };
 
-    // Note: fileContent would need to be added to SymbolQueryRow if needed
-    // For now, we don't extract content in processSymbolResult
+    // Extract symbol content if fileContent is available
+    if (symbol.fileContent) {
+      const lines = symbol.fileContent.split('\n');
+      const startLine = (symbol.lineStart || symbol.line_start) - 1;
+      const endLine = (symbol.lineEnd || symbol.line_end);
+      
+      if (startLine >= 0 && endLine <= lines.length) {
+        result.content = lines.slice(startLine, endLine).join('\n');
+      }
+    }
 
     return result;
   }
 
   private estimateTokens(data: unknown): number {
+    // Quick estimation without encoding for performance
+    // Only do actual encoding if absolutely necessary
+    const text = typeof data === 'string' ? data : JSON.stringify(data);
+    
+    // Use fast approximation: ~4 characters per token for English text
+    // This is accurate enough for limiting purposes
+    return Math.ceil(text.length / 4);
+  }
+  
+  private accurateTokenCount(data: unknown): number {
+    // Use this only when exact count is needed
     const text = JSON.stringify(data);
     try {
       return this.tokenEncoder.encode(text).length;
@@ -683,7 +768,7 @@ export class ContextRetriever {
     }
   }
   
-  private extractRelevantContent(content: string, options: QueryOptions): string {
+  private extractRelevantContent(content: string, _options: QueryOptions): string {
     const lines = content.split('\n');
     const maxLines = 200; // Reasonable limit for context
     
@@ -1366,6 +1451,105 @@ export class ContextRetriever {
     return suggestions.map(s => s.name);
   }
 
+  public async listAllSymbols(options: {
+    fileTypes?: string[];
+    symbolType?: string;
+    limit?: number;
+  } = {}): Promise<SymbolResult[]> {
+    const database = this.db.getDatabase();
+    const limit = options.limit || 100;
+    
+    const whereConditions: string[] = [];
+    const params: any[] = [];
+    
+    if (options.fileTypes?.length) {
+      const placeholders = options.fileTypes.map(() => '?').join(',');
+      whereConditions.push(`f.language IN (${placeholders})`);
+      params.push(...options.fileTypes);
+    }
+    
+    if (options.symbolType) {
+      whereConditions.push(`s.type = ?`);
+      params.push(options.symbolType);
+    }
+    
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+    
+    const query = `
+      SELECT 
+        s.id,
+        s.name,
+        s.type,
+        s.signature,
+        s.file_id,
+        s.line_start as lineStart,
+        s.line_end as lineEnd,
+        f.relative_path as filePath
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      ${whereClause}
+      ORDER BY s.type, s.name
+      LIMIT ?
+    `;
+    
+    params.push(limit);
+    const results = database.prepare(query).all(...params) as SymbolQueryRow[];
+    
+    return results.map(symbol => this.processSymbolResult(symbol));
+  }
+
+  public async listAllFiles(options: {
+    fileTypes?: string[];
+    limit?: number;
+  } = {}): Promise<FileResult[]> {
+    const database = this.db.getDatabase();
+    const limit = options.limit || 100;
+    
+    const whereConditions: string[] = [];
+    const params: any[] = [];
+    
+    if (options.fileTypes?.length) {
+      const placeholders = options.fileTypes.map(() => '?').join(',');
+      whereConditions.push(`language IN (${placeholders})`);
+      params.push(...options.fileTypes);
+    }
+    
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}`
+      : '';
+    
+    const query = `
+      SELECT 
+        id,
+        relative_path,
+        language,
+        size,
+        hash,
+        last_modified,
+        LENGTH(content) / 4 as tokens  -- Approximate token count
+      FROM files
+      ${whereClause}
+      ORDER BY relative_path
+      LIMIT ?
+    `;
+    
+    params.push(limit);
+    const files = database.prepare(query).all(...params) as FileQueryRow[];
+    
+    return files.map(file => ({
+      id: file.id,
+      path: file.relative_path,  // FileResult expects 'path' property
+      relativePath: file.relative_path,
+      language: file.language,
+      tokens: file.tokens || 0,
+      hash: file.hash,
+      lastModified: new Date(file.last_modified),
+      content: ''  // Don't include content in list view
+    }));
+  }
+
   public async getContextSummary(): Promise<string> {
     const stats = await this.db.getDatabaseInfo();
     const database = this.db.getDatabase();
@@ -1443,7 +1627,32 @@ export class ContextRetriever {
   
   private escapeFTS5(term: string): string {
     // FTS5 special characters that need escaping or removal
-    // If the term contains only special characters, return empty to trigger LIKE fallback
+    // For special patterns like decorators (@router.post) or function calls (Depends())
+    // we'll return empty to trigger LIKE fallback which handles them better
+    
+    // Check if this is a decorator pattern (starts with @)
+    if (term.startsWith('@')) {
+      return ''; // Use LIKE for decorator searches
+    }
+    
+    // Check if this contains parentheses (function call pattern)
+    if (term.includes('(') || term.includes(')')) {
+      return ''; // Use LIKE for function call patterns
+    }
+    
+    // Check if this is an expanded alias with OR operators
+    if (term.includes(' OR ')) {
+      // For expanded aliases, we need to use LIKE since FTS5 OR syntax is complex
+      return ''; // Fall back to LIKE for OR queries
+    }
+    
+    // Check for dots which might indicate method calls or module paths
+    // FTS5 doesn't handle dots well, so use LIKE for these patterns
+    if (term.includes('.')) {
+      return ''; // Use LIKE for patterns with dots (e.g., router.post, app.get)
+    }
+    
+    // Remove special characters
     const cleaned = term.replace(/[^a-zA-Z0-9\s_-]/g, '');
     
     // If nothing remains after cleaning, we can't use FTS5
@@ -1514,7 +1723,7 @@ export class ContextRetriever {
     
     sqlParams.push(lowerTerm, `${lowerTerm}%`, `%${lowerTerm}%`);
     
-    let candidates = database.prepare(sqlQuery).all(...sqlParams) as SymbolQueryRow[];
+    const candidates = database.prepare(sqlQuery).all(...sqlParams) as SymbolQueryRow[];
     
     // If we still have few results, try fuzzy matching on a larger set
     if (candidates.length < 5) {
@@ -1573,13 +1782,26 @@ export class ContextRetriever {
     return candidates.slice(0, 10);
   }
   
-  private buildFileLikeQuery(_searchTerm: string, options: QueryOptions): string {
+  private buildFileLikeQuery(searchTerm: string, options: QueryOptions): string {
+    // Check if this is an OR query (expanded alias)
+    const isOrQuery = searchTerm.includes(' OR ');
+    let whereClause: string;
+    
+    if (isOrQuery) {
+      // Split OR terms and build conditions for each
+      const terms = searchTerm.split(/\s+OR\s+/i);
+      const conditions = terms.map(() => '(f.content LIKE ? OR f.relative_path LIKE ?)').join(' OR ');
+      whereClause = `WHERE (${conditions})`;
+    } else {
+      whereClause = 'WHERE (f.content LIKE ? OR f.relative_path LIKE ?)';
+    }
+    
     let query = `
       SELECT 
         f.id, f.path, f.relative_path, f.content, 
         f.language, f.metadata, f.size, f.last_modified
       FROM files f
-      WHERE (f.content LIKE ? OR f.relative_path LIKE ?)
+      ${whereClause}
     `;
     
     if (options.fileTypes && options.fileTypes.length > 0) {
@@ -1590,20 +1812,63 @@ export class ContextRetriever {
     return query;
   }
   
-  private buildSymbolLikeQuery(_searchTerm: string, options: QueryOptions): string {
+  private buildSymbolLikeQuery(searchTerm: string, options: QueryOptions): string {
+    // Check if this is an OR query (expanded alias)
+    const isOrQuery = searchTerm.includes(' OR ');
+    let whereClause: string;
+    
+    if (isOrQuery) {
+      // Split OR terms and build conditions for each
+      const terms = searchTerm.split(/\s+OR\s+/i);
+      const conditions = terms.map(() => '(s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)').join(' OR ');
+      whereClause = `WHERE (${conditions})`;
+    } else {
+      whereClause = 'WHERE (s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)';
+    }
+    
+    // For multi-word searches like "async def get_current_user", prioritize signature matches
+    const hasMultipleWords = !isOrQuery && searchTerm.trim().split(/\s+/).length > 1;
+    
     let query = `
       SELECT 
         s.*, f.relative_path as filePath, f.language, f.content as fileContent
       FROM symbols s
       JOIN files f ON s.file_id = f.id
-      WHERE (s.name LIKE ? OR s.signature LIKE ?)
+      ${whereClause}
     `;
+    
+    if (options.symbolType) {
+      query += ` AND s.type = '${options.symbolType}'`;
+    }
     
     if (options.fileTypes && options.fileTypes.length > 0) {
       query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
     }
     
-    query += ' ORDER BY s.name LIMIT 100';
+    // Better ordering: prioritize exact matches and signature matches for multi-word queries
+    if (isOrQuery) {
+      // For OR queries, just order by name length
+      query += ` ORDER BY LENGTH(s.name) LIMIT 100`;
+    } else if (hasMultipleWords) {
+      query += ` ORDER BY 
+        CASE 
+          WHEN s.signature LIKE ? THEN 0
+          WHEN s.name LIKE ? THEN 1
+          ELSE 2
+        END,
+        LENGTH(s.name)
+      LIMIT 100`;
+    } else {
+      query += ` ORDER BY 
+        CASE 
+          WHEN LOWER(s.name) = LOWER(?) THEN 0
+          WHEN s.name LIKE ? THEN 1
+          ELSE 2
+        END,
+        LENGTH(s.name)
+      LIMIT 100`;
+    }
+    
     return query;
   }
   
@@ -1703,6 +1968,6 @@ export class ContextRetriever {
     
     // Search and return top matches
     const results = fuse.search(searchTerm);
-    return results.slice(0, 10).map(r => r.item);
+    return results.slice(0, 10).map((r: any) => r.item);
   }
 }

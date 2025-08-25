@@ -5,6 +5,7 @@ import type { NodePath } from '@babel/traverse';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const traverse = (_traverse as any)?.default || _traverse;
 import { BaseExtractor } from './base.js';
+import { EndpointDetector } from './endpoint-detector.js';
 import type { FileInfo, ExtractedContext, Symbol, CallReference } from '../types/index.js';
 import type { 
   BabelNode, 
@@ -19,6 +20,13 @@ import type {
 } from './types.js';
 
 export class TypeScriptExtractor extends BaseExtractor {
+  private endpointDetector: EndpointDetector;
+  
+  constructor() {
+    super();
+    this.endpointDetector = new EndpointDetector();
+  }
+  
   getSupportedLanguages(): string[] {
     return ['typescript', 'javascript', 'jsx', 'tsx'];
   }
@@ -83,11 +91,11 @@ export class TypeScriptExtractor extends BaseExtractor {
           }
         },
         ClassDeclaration: (path: NodePath) => {
-          this.extractClass(path.node as unknown as BabelNode, context.symbols);
+          this.extractClass(path.node as unknown as BabelNode, context.symbols, undefined, context.calls);
         },
         ClassExpression: (path: NodePath) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
-            this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
+            this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name, context.calls);
           }
         },
         TSInterfaceDeclaration: (path: NodePath) => {
@@ -143,6 +151,27 @@ export class TypeScriptExtractor extends BaseExtractor {
       
       // Build structure
       context.structure = this.buildStructure(context.symbols);
+      
+      // Detect API endpoints
+      const endpoints = this.endpointDetector.detectEndpoints(this.content, fileInfo.path);
+      
+      // Merge endpoints with existing symbols, avoiding duplicates
+      const existingLines = new Set(context.symbols.map(s => `${s.lineStart}-${s.name}`));
+      for (const endpoint of endpoints) {
+        const key = `${endpoint.lineStart}-${endpoint.name}`;
+        if (!existingLines.has(key)) {
+          context.symbols.push(endpoint);
+        }
+      }
+      
+      // Mark existing functions/methods as endpoints if they match patterns
+      for (const symbol of context.symbols) {
+        if (symbol.type === 'function' || symbol.type === 'method') {
+          if (this.endpointDetector.isLikelyEndpoint(symbol)) {
+            symbol.metadata = { ...symbol.metadata, isEndpoint: true };
+          }
+        }
+      }
       
     } catch {
       // Fallback to regex-based extraction if AST parsing fails
@@ -248,7 +277,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractClass(node: BabelNode, symbols: Symbol[], name?: string): void {
+  private extractClass(node: BabelNode, symbols: Symbol[], name?: string, calls?: CallReference[]): void {
     const className = name || node.id?.name;
     if (!className) return;
     
@@ -260,8 +289,21 @@ export class TypeScriptExtractor extends BaseExtractor {
     
     let signature = `class ${className}`;
     if (node.superClass) {
-      const superName = node.superClass.type === 'Identifier' ? node.superClass.name : 'unknown';
+      const superName = node.superClass.type === 'Identifier' && node.superClass.name 
+        ? node.superClass.name 
+        : 'unknown';
       signature += ` extends ${superName}`;
+      
+      // Track extends relationship
+      if (calls && superName !== 'unknown') {
+        calls.push({
+          calleeName: superName,
+          callType: 'extends',
+          line: lineStart,
+          column: node.loc?.start.column || 0,
+          isExternal: false
+        });
+      }
     }
     
     const methods: string[] = [];
@@ -418,7 +460,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     if (node.callee.type === 'Identifier' && node.callee.name) {
       calls.push({
         calleeName: node.callee.name,
-        callType: 'constructor',
+        callType: 'instantiation',
         line: node.loc?.start.line || 1,
         column: node.loc?.start.column || 0,
         isExternal: false

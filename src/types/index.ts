@@ -18,7 +18,7 @@ export interface ScanOptions {
 
 export interface Symbol {
   name: string;
-  type: 'function' | 'class' | 'interface' | 'type' | 'variable' | 'constant' | 'export' | 'import' | 'method' | 'property' | 'namespace' | 'module' | 'struct' | 'enum' | 'trait';
+  type: 'function' | 'class' | 'interface' | 'type' | 'variable' | 'constant' | 'export' | 'import' | 'method' | 'property' | 'namespace' | 'module' | 'struct' | 'enum' | 'trait' | 'decorator' | 'endpoint' | 'middleware';
   lineStart: number;
   lineEnd: number;
   signature?: string;
@@ -28,7 +28,7 @@ export interface Symbol {
 
 export interface CallReference {
   calleeName: string;
-  callType: 'function' | 'method' | 'constructor' | 'import';
+  callType: 'function' | 'method' | 'constructor' | 'import' | 'extends' | 'implements' | 'instantiation';
   line: number;
   column?: number;
   isExternal?: boolean;
@@ -42,6 +42,12 @@ export interface ExtractedContext {
   comments: string[];
   calls: CallReference[];
   structure: CodeStructure;
+  relationships?: Array<{
+    type: 'extends' | 'implements' | 'imports' | 'exports';
+    source: string;
+    target: string;
+    line?: number;
+  }>;
 }
 
 export interface IndexOptions extends Partial<ScanOptions> {
@@ -243,6 +249,8 @@ export interface QueryCommandOptions {
   blame?: boolean;
   languages?: string;
   type?: string;
+  refresh?: boolean;
+  useAlias?: boolean;
 }
 
 export interface FindCommandOptions {
@@ -319,6 +327,7 @@ export interface SymbolQueryRow extends SymbolRow {
   language?: string | null;
   lineStart?: number; // Alias for line_start used in some queries
   lineEnd?: number; // Alias for line_end used in some queries
+  fileContent?: string; // File content for extracting symbol body
 }
 
 export interface CallGraphRow {

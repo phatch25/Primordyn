@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { GitCommit, GitFileChange, GitBlame, GitHistory } from '../types/index.js';
 
@@ -316,15 +316,13 @@ export class GitAnalyzer {
   private findSymbolLines(filePath: string, symbolName: string): { start: number; end: number } | null {
     try {
       // Read the file content
-      const fs = require('fs');
-      const path = require('path');
-      const fullPath = path.join(this.projectRoot, filePath);
+      const fullPath = join(this.projectRoot, filePath);
       
-      if (!fs.existsSync(fullPath)) {
+      if (!existsSync(fullPath)) {
         return null;
       }
       
-      const content = fs.readFileSync(fullPath, 'utf8');
+      const content = readFileSync(fullPath, 'utf8');
       const lines = content.split('\n');
       
       // Search for the symbol definition

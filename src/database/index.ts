@@ -2,10 +2,13 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import type { DatabaseInfo } from '../types/index.js';
+import { SymbolRepository, FileRepository } from './repositories/index.js';
 
 export class PrimordynDB {
   private db: Database.Database;
   private dbPath: string;
+  public readonly symbols: SymbolRepository;
+  public readonly files: FileRepository;
 
   constructor(projectPath: string = process.cwd()) {
     const dbDir = join(projectPath, '.primordyn');
@@ -17,11 +20,22 @@ export class PrimordynDB {
     this.dbPath = join(dbDir, 'context.db');
     this.db = new Database(this.dbPath);
     this.initializeSchema();
+    
+    // Initialize repositories
+    this.symbols = new SymbolRepository(this.db);
+    this.files = new FileRepository(this.db);
   }
 
   private initializeSchema(): void {
     // Enable foreign keys
     this.db.pragma('foreign_keys = ON');
+    
+    // Performance optimizations
+    this.db.pragma('journal_mode = WAL'); // Write-Ahead Logging for better concurrency
+    this.db.pragma('synchronous = NORMAL'); // Faster writes, still safe
+    this.db.pragma('cache_size = -64000'); // 64MB cache
+    this.db.pragma('temp_store = MEMORY'); // Use memory for temp tables
+    this.db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
     
     // Create tables
     this.db.exec(`
@@ -67,7 +81,7 @@ export class PrimordynDB {
         callee_name TEXT NOT NULL,
         callee_symbol_id INTEGER,
         callee_file_id INTEGER,
-        call_type TEXT NOT NULL, -- 'function', 'method', 'constructor', 'import'
+        call_type TEXT NOT NULL, -- 'function', 'method', 'constructor', 'import', 'extends', 'implements', 'instantiation'
         line_number INTEGER NOT NULL,
         column_number INTEGER,
         FOREIGN KEY (caller_symbol_id) REFERENCES symbols (id) ON DELETE CASCADE,
@@ -82,8 +96,10 @@ export class PrimordynDB {
       CREATE INDEX IF NOT EXISTS idx_files_language ON files(language);
       CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
       CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+      CREATE INDEX IF NOT EXISTS idx_symbols_name_lower ON symbols(LOWER(name)); -- Case-insensitive search
       CREATE INDEX IF NOT EXISTS idx_symbols_type ON symbols(type);
       CREATE INDEX IF NOT EXISTS idx_symbols_file_id ON symbols(file_id);
+      CREATE INDEX IF NOT EXISTS idx_symbols_composite ON symbols(file_id, type, name); -- Composite for complex queries
       CREATE INDEX IF NOT EXISTS idx_context_cache_query_hash ON context_cache(query_hash);
       CREATE INDEX IF NOT EXISTS idx_context_cache_expires_at ON context_cache(expires_at);
       
