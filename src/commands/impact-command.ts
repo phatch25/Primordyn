@@ -58,9 +58,10 @@ export const impactCommand =
         const queue: ImpactNode[] = [];
         const impactMap = new Map<number, ImpactNode[]>();
         
-        // Get direct references (depth 1)
+        // Get direct references (depth 1) - improved query
+        // First try with symbol ID, then fall back to name matching
         const directRefsStmt = db.getDatabase().prepare(`
-          SELECT 
+          SELECT DISTINCT
             s.name as symbol_name,
             f.path as file_path,
             s.type,
@@ -70,13 +71,27 @@ export const impactCommand =
           FROM call_graph cg
           JOIN symbols s ON cg.caller_symbol_id = s.id
           JOIN files f ON s.file_id = f.id
-          WHERE cg.callee_symbol_id = (
-            SELECT id FROM symbols WHERE name = ? LIMIT 1
-          )
+          WHERE cg.callee_symbol_id = ?
+             OR cg.callee_name = ?
+          GROUP BY s.id
+          
+          UNION
+          
+          SELECT DISTINCT
+            s.name as symbol_name,
+            f.path as file_path,
+            s.type,
+            s.line_start,
+            f.relative_path,
+            COUNT(*) as reference_count
+          FROM call_graph cg
+          JOIN symbols s ON cg.caller_symbol_id = s.id
+          JOIN files f ON s.file_id = f.id
+          WHERE cg.callee_name = ?
           GROUP BY s.id
         `);
         
-        const directRefs = directRefsStmt.all(symbolName) as ImpactNode[];
+        const directRefs = directRefsStmt.all(targetSymbol.id, symbolName, symbolName) as ImpactNode[];
         directRefs.forEach(ref => {
           ref.depth = 1;
           queue.push(ref);
@@ -123,6 +138,54 @@ export const impactCommand =
           });
         }
         
+        // If no dependencies found via call graph, try text-based search
+        if (directRefs.length === 0) {
+          const textSearchStmt = db.getDatabase().prepare(`
+            SELECT DISTINCT
+              f.path as file_path,
+              f.relative_path,
+              f.content
+            FROM files f
+            WHERE f.content LIKE ?
+              AND f.id != (SELECT file_id FROM symbols WHERE id = ?)
+            LIMIT 50
+          `);
+          
+          const searchPattern = `%${symbolName}%`;
+          const textResults = textSearchStmt.all(searchPattern, targetSymbol.id) as any[];
+          
+          // Analyze text results for actual usage
+          textResults.forEach(file => {
+            const lines = file.content.split('\n');
+            const usageLines: number[] = [];
+            
+            lines.forEach((line: string, idx: number) => {
+              // Look for actual usage patterns (not just comments)
+              if (line.includes(symbolName) && 
+                  !line.trim().startsWith('#') && 
+                  !line.trim().startsWith('//') &&
+                  !line.trim().startsWith('*')) {
+                usageLines.push(idx + 1);
+              }
+            });
+            
+            if (usageLines.length > 0) {
+              const impactNode: ImpactNode = {
+                symbol_name: `<text reference>`,
+                file_path: file.file_path,
+                relative_path: file.relative_path,
+                type: 'reference',
+                line_start: usageLines[0],
+                reference_count: usageLines.length,
+                depth: 1
+              };
+              
+              if (!impactMap.has(1)) impactMap.set(1, []);
+              impactMap.get(1)!.push(impactNode);
+            }
+          });
+        }
+        
         spinner.stop();
         
         // Calculate statistics
@@ -145,7 +208,30 @@ export const impactCommand =
         console.log(chalk.gray(`Target: ${targetSymbol.type} ${symbolName} in ${targetSymbol.relative_path}:${targetSymbol.line_start}\n`));
         
         if (totalImpacted === 0) {
-          console.log(chalk.green('✨ No dependencies found. This symbol can be safely modified.'));
+          console.log(chalk.yellow('⚠️  No direct dependencies found in call graph'));
+          console.log(chalk.gray('This could mean:'));
+          console.log(chalk.gray('  • The symbol is unused'));
+          console.log(chalk.gray('  • It\'s only used via dynamic calls/imports'));
+          console.log(chalk.gray('  • It\'s called from external code'));
+          console.log(chalk.gray('  • The index needs updating (run "primordyn index")'));
+          
+          // Try one more fallback - simple text search
+          console.log(chalk.blue('\nSearching for text references...'));
+          const simpleSearchStmt = db.getDatabase().prepare(`
+            SELECT COUNT(*) as count
+            FROM files f
+            WHERE f.content LIKE ?
+              AND f.id != (SELECT file_id FROM symbols WHERE id = ?)
+          `);
+          const result = simpleSearchStmt.get(`%${symbolName}%`, targetSymbol.id) as {count: number};
+          
+          if (result.count > 0) {
+            console.log(chalk.yellow(`Found ${result.count} files that mention "${symbolName}"`));
+            console.log(chalk.gray('Use "primordyn query" with --include-callers to see text references'));
+          } else {
+            console.log(chalk.green('No text references found either - symbol appears unused'));
+          }
+          
           db.close();
           return;
         }
