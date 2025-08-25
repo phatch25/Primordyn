@@ -138,9 +138,11 @@ export class UnusedCommand extends BaseCommand {
     
     // Recommendations
     console.log(this.formatter.formatHeader('\n📝 Recommendations:'));
-    console.log('  • Review and remove confirmed dead code');
+    console.log('  • Review large unused blocks first for maximum impact');
+    console.log('  • Verify exported symbols are not part of a public API');
     console.log('  • Consider if symbols are used via dynamic imports or reflection');
-    console.log('  • Check if symbols are part of a public API');
+    console.log('  • Use --ignore patterns to exclude known false positives');
+    console.log('  • Run with --strict for more comprehensive detection');
   }
 
   private groupByType(symbols: any[]): Record<string, any[]> {
@@ -154,5 +156,19 @@ export class UnusedCommand extends BaseCommand {
     }
     
     return grouped;
+  }
+  
+  private getSymbolIcon(type: string): string {
+    const icons: Record<string, string> = {
+      'function': '𝑓',
+      'method': '𝑚',
+      'class': '◆',
+      'interface': '◇',
+      'variable': '𝑣',
+      'const': '𝑐',
+      'type': '𝑡',
+      'enum': '𝑒'
+    };
+    return icons[type.toLowerCase()] || '○';
   }
 }

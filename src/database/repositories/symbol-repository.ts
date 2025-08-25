@@ -80,6 +80,10 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
     file?: string;
     ignoreTests?: boolean;
     minLines?: number;
+    ignoreDocs?: boolean;
+    ignoreExamples?: boolean;
+    ignoreConfig?: boolean;
+    customIgnore?: string[];
   } = {}): SymbolRow[] {
     let query = `
       SELECT 
@@ -98,8 +102,30 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
         FROM call_graph 
         WHERE callee_symbol_id IS NOT NULL
       )
-      AND s.name NOT IN ('default', 'exports', 'module.exports')
+      -- Filter out common false positives
+      AND s.name NOT IN (
+        'default', 'exports', 'module.exports',
+        -- Common entry points and configs
+        'main', 'index', 'app', 'App', 'config', 'Config',
+        -- React components that may be lazy loaded
+        'render', 'Component', 'Provider',
+        -- CLI and scripts
+        'cli', 'run', 'start', 'build', 'serve',
+        -- Event handlers that might be bound dynamically
+        'onClick', 'onChange', 'onSubmit', 'onLoad', 'onError',
+        -- Common lifecycle methods
+        'constructor', 'componentDidMount', 'componentWillUnmount',
+        'useEffect', 'useState', 'useMemo', 'useCallback'
+      )
       AND s.type NOT IN ('export', 'import', 'require')
+      -- Filter out symbols that start with underscore (private convention)
+      AND s.name NOT LIKE '\_%'
+      -- Filter out test helpers and mocks
+      AND s.name NOT LIKE '%Mock%'
+      AND s.name NOT LIKE '%Stub%'
+      AND s.name NOT LIKE '%Fake%'
+      AND s.name NOT LIKE '%Test%'
+      AND s.name NOT LIKE '%Spec%'
     `;
 
     const params: any[] = [];
@@ -115,10 +141,53 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
       params.push(`%${options.file}%`);
     }
 
-    if (options.ignoreTests) {
+    if (options.ignoreTests !== false) {
+      // Default to true - ignore test files
       conditions.push("f.relative_path NOT LIKE '%test%'");
       conditions.push("f.relative_path NOT LIKE '%spec%'");
       conditions.push("f.relative_path NOT LIKE '%__tests__%'");
+      conditions.push("f.relative_path NOT LIKE '%.test.%'");
+      conditions.push("f.relative_path NOT LIKE '%.spec.%'");
+    }
+
+    if (options.ignoreDocs !== false) {
+      // Default to true - ignore documentation files
+      conditions.push("f.relative_path NOT LIKE '%/docs/%'");
+      conditions.push("f.relative_path NOT LIKE '%/documentation/%'");
+      conditions.push("f.relative_path NOT LIKE '%.md'");
+      conditions.push("f.relative_path NOT LIKE '%README%'");
+      conditions.push("f.relative_path NOT LIKE '%CHANGELOG%'");
+      conditions.push("f.relative_path NOT LIKE '%LICENSE%'");
+    }
+
+    if (options.ignoreExamples !== false) {
+      // Default to true - ignore example files
+      conditions.push("f.relative_path NOT LIKE '%/examples/%'");
+      conditions.push("f.relative_path NOT LIKE '%/example/%'");
+      conditions.push("f.relative_path NOT LIKE '%/samples/%'");
+      conditions.push("f.relative_path NOT LIKE '%/demo/%'");
+      conditions.push("f.relative_path NOT LIKE '%.example.%'");
+    }
+
+    if (options.ignoreConfig !== false) {
+      // Default to true - ignore config files
+      conditions.push("f.relative_path NOT LIKE '%.config.%'");
+      conditions.push("f.relative_path NOT LIKE '%webpack.%'");
+      conditions.push("f.relative_path NOT LIKE '%rollup.%'");
+      conditions.push("f.relative_path NOT LIKE '%vite.%'");
+      conditions.push("f.relative_path NOT LIKE '%jest.%'");
+      conditions.push("f.relative_path NOT LIKE '%babel.%'");
+      conditions.push("f.relative_path NOT LIKE '%eslint%'");
+      conditions.push("f.relative_path NOT LIKE '%prettier%'");
+      conditions.push("f.relative_path NOT LIKE '%tsconfig%'");
+    }
+
+    // Custom ignore patterns
+    if (options.customIgnore && options.customIgnore.length > 0) {
+      for (const pattern of options.customIgnore) {
+        conditions.push('f.relative_path NOT LIKE ?');
+        params.push(`%${pattern}%`);
+      }
     }
 
     if (options.minLines) {
