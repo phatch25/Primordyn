@@ -102,7 +102,22 @@ ${chalk.bold('Tips:')}
       
       // Handle different output formats
       if (format === 'json') {
-        console.log(JSON.stringify(result, null, 2));
+        // Transform symbols to navigation-focused format (remove verbose content)
+        const navigationResult = {
+          symbols: result.symbols.map((symbol: any) => ({
+            id: symbol.id,
+            name: symbol.name,
+            type: symbol.type,
+            filePath: symbol.filePath,
+            lineStart: symbol.lineStart,
+            lineEnd: symbol.lineEnd,
+            signature: symbol.signature
+            // Exclude content field for navigation focus
+          })),
+          dependencyGraph: result.dependencyGraph,
+          impactAnalysis: result.impactAnalysis
+        };
+        console.log(JSON.stringify(navigationResult, null, 2));
       } else {
         outputNavigationFormat(validatedSearchTerm, result, options);
       }
@@ -133,10 +148,11 @@ function outputNavigationFormat(searchTerm: string, result: any, options: any) {
     console.log(chalk.gray(`Signature: ${primary.signature}`));
   }
   
-  // Additional locations if multiple definitions
-  if (result.symbols.length > 1) {
+  // Additional locations if multiple definitions of the SAME type
+  const sameTypeSymbols = result.symbols.filter((s: any) => s.type === primary.type);
+  if (sameTypeSymbols.length > 1) {
     console.log(chalk.gray(`\nAlso defined in:`));
-    result.symbols.slice(1).forEach((s: any) => {
+    sameTypeSymbols.slice(1).forEach((s: any) => {
       console.log(chalk.gray(`  • ${s.filePath}:${s.lineStart}`));
     });
   }
@@ -156,12 +172,34 @@ function outputNavigationFormat(searchTerm: string, result: any, options: any) {
     }
     
     if (graph.calledBy && graph.calledBy.length > 0) {
-      console.log(chalk.cyan(`\nCalled by (${graph.calledBy.length}):`));
-      graph.calledBy.slice(0, 10).forEach((c: any) => {
+      // Filter out anonymous entries and provide better names
+      const namedCallers = graph.calledBy.map((c: any) => {
+        if (c.from.name === 'anonymous' || !c.from.name) {
+          // Extract function name from file or use file name
+          const fileName = c.from.filePath.split('/').pop()?.replace('.ts', '').replace('.js', '') || 'unknown';
+          return {
+            ...c,
+            from: {
+              ...c.from,
+              name: `${fileName} file`
+            }
+          };
+        }
+        return c;
+      });
+
+      // Deduplicate by file:line combination
+      const uniqueCallers = namedCallers.filter((c: any, index: number, array: any[]) => {
+        const key = `${c.from.filePath}:${c.from.line}`;
+        return array.findIndex((other: any) => `${other.from.filePath}:${other.from.line}` === key) === index;
+      });
+
+      console.log(chalk.cyan(`\nCalled by (${uniqueCallers.length}):`));
+      uniqueCallers.slice(0, 10).forEach((c: any) => {
         console.log(`  ← ${c.from.name} at ${c.from.filePath}:${c.from.line}`);
       });
-      if (graph.calledBy.length > 10) {
-        console.log(chalk.gray(`  ... and ${graph.calledBy.length - 10} more`));
+      if (uniqueCallers.length > 10) {
+        console.log(chalk.gray(`  ... and ${uniqueCallers.length - 10} more`));
       }
     }
   }

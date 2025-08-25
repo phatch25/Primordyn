@@ -301,15 +301,21 @@ export class Indexer {
   private resolveCallGraphReferences(): void {
     const database = this.db.getDatabase();
     
-    // Update call graph entries where callee_symbol_id is null but we can now resolve it
-    const updateStmt = database.prepare(`
+    // Update both caller and callee symbol IDs
+    const updateCalleeStmt = database.prepare(`
       UPDATE call_graph 
       SET callee_symbol_id = ?, callee_file_id = ?
       WHERE id = ?
     `);
     
-    // Find unresolved calls
-    const unresolvedCalls = database.prepare(`
+    const updateCallerStmt = database.prepare(`
+      UPDATE call_graph 
+      SET caller_symbol_id = ?
+      WHERE id = ?
+    `);
+    
+    // Find unresolved callee calls
+    const unresolvedCallees = database.prepare(`
       SELECT id, callee_name, call_type 
       FROM call_graph 
       WHERE callee_symbol_id IS NULL 
@@ -317,9 +323,8 @@ export class Indexer {
         AND call_type IN ('instantiation', 'constructor', 'function')
     `).all() as Array<{id: number; callee_name: string; call_type: string}>;
     
-    let resolved = 0;
-    for (const call of unresolvedCalls) {
-      // Try to resolve the symbol
+    let resolvedCallees = 0;
+    for (const call of unresolvedCallees) {
       let symbol = null;
       
       if (call.call_type === 'instantiation' || call.call_type === 'constructor') {
@@ -341,13 +346,37 @@ export class Indexer {
       }
       
       if (symbol) {
-        updateStmt.run(symbol.id, symbol.file_id, call.id);
-        resolved++;
+        updateCalleeStmt.run(symbol.id, symbol.file_id, call.id);
+        resolvedCallees++;
+      }
+    }
+
+    // Find and resolve unresolved caller symbols
+    const unresolvedCallers = database.prepare(`
+      SELECT cg.id, cg.caller_file_id, cg.line_number
+      FROM call_graph cg
+      WHERE cg.caller_symbol_id IS NULL AND cg.caller_file_id IS NOT NULL
+    `).all() as Array<{id: number; caller_file_id: number; line_number: number}>;
+
+    let resolvedCallers = 0;
+    for (const call of unresolvedCallers) {
+      // Find which symbol contains this line in the caller file
+      const callerSymbol = database.prepare(`
+        SELECT id 
+        FROM symbols 
+        WHERE file_id = ? AND line_start <= ? AND line_end >= ?
+        ORDER BY line_start DESC
+        LIMIT 1
+      `).get(call.caller_file_id, call.line_number, call.line_number) as {id: number} | undefined;
+
+      if (callerSymbol) {
+        updateCallerStmt.run(callerSymbol.id, call.id);
+        resolvedCallers++;
       }
     }
     
-    if (resolved > 0 && process.env.DEBUG) {
-      console.log(`Resolved ${resolved} call graph references`);
+    if ((resolvedCallees > 0 || resolvedCallers > 0) && process.env.DEBUG) {
+      console.log(`Resolved ${resolvedCallees} callee references and ${resolvedCallers} caller references`);
     }
   }
   

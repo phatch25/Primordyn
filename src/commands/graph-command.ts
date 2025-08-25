@@ -56,17 +56,69 @@ export const graphCommand = new Command('graph')
         }
         visited.add(key);
         
-        // Get dependencies using raw SQL
-        const query = isReverse 
-          ? `SELECT DISTINCT caller_symbol_id as symbol_id FROM call_graph WHERE callee_symbol_id = ?`
-          : `SELECT DISTINCT callee_symbol_id as symbol_id FROM call_graph WHERE caller_symbol_id = ?`;
-        
-        const deps = db.getDatabase().prepare(query).all(symbolId) as any[];
-        
-        // Get symbol info
+        // Get symbol info first
         const symbolQuery = `SELECT * FROM symbols WHERE id = ?`;
         const symbol = db.getDatabase().prepare(symbolQuery).get(symbolId) as any;
         if (!symbol) return null;
+        
+        // Get dependencies using raw SQL
+        let deps: any[] = [];
+        
+        if (isReverse) {
+          // For reverse: find who calls this symbol (or its methods if it's a class)
+          if (symbol.type === 'class') {
+            // Get all methods of this class and find their callers
+            const classMethods = db.getDatabase().prepare(`
+              SELECT id FROM symbols 
+              WHERE file_id = ? AND line_start >= ? AND line_end <= ?
+              AND type IN ('method', 'constructor')
+            `).all(symbol.file_id, symbol.line_start, symbol.line_end) as {id: number}[];
+            
+            const methodIds = [symbolId, ...classMethods.map(m => m.id)];
+            if (methodIds.length > 0) {
+              const placeholders = methodIds.map(() => '?').join(',');
+              deps = db.getDatabase().prepare(`
+                SELECT DISTINCT caller_symbol_id as symbol_id 
+                FROM call_graph 
+                WHERE callee_symbol_id IN (${placeholders})
+                AND caller_symbol_id IS NOT NULL
+              `).all(...methodIds) as any[];
+            }
+          } else {
+            deps = db.getDatabase().prepare(`
+              SELECT DISTINCT caller_symbol_id as symbol_id 
+              FROM call_graph 
+              WHERE callee_symbol_id = ? AND caller_symbol_id IS NOT NULL
+            `).all(symbolId) as any[];
+          }
+        } else {
+          // For forward: find what this symbol calls (or what its methods call if it's a class)
+          if (symbol.type === 'class') {
+            // Get all methods of this class and find what they call
+            const classMethods = db.getDatabase().prepare(`
+              SELECT id FROM symbols 
+              WHERE file_id = ? AND line_start >= ? AND line_end <= ?
+              AND type IN ('method', 'constructor')
+            `).all(symbol.file_id, symbol.line_start, symbol.line_end) as {id: number}[];
+            
+            const methodIds = [symbolId, ...classMethods.map(m => m.id)];
+            if (methodIds.length > 0) {
+              const placeholders = methodIds.map(() => '?').join(',');
+              deps = db.getDatabase().prepare(`
+                SELECT DISTINCT callee_symbol_id as symbol_id 
+                FROM call_graph 
+                WHERE caller_symbol_id IN (${placeholders})
+                AND callee_symbol_id IS NOT NULL
+              `).all(...methodIds) as any[];
+            }
+          } else {
+            deps = db.getDatabase().prepare(`
+              SELECT DISTINCT callee_symbol_id as symbol_id 
+              FROM call_graph 
+              WHERE caller_symbol_id = ? AND callee_symbol_id IS NOT NULL
+            `).all(symbolId) as any[];
+          }
+        }
         
         // Get file info for location
         const fileQuery = `SELECT relative_path FROM files WHERE id = ?`;

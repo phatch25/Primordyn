@@ -94,7 +94,7 @@ ${chalk.bold('Supported languages:')}
         languages,
         maxFileSize,
         updateExisting: options.update,
-        verbose: !options.quiet
+        verbose: false // Let the command handle all output formatting
       });
       
       if (!options.quiet) {

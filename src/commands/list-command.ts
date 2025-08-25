@@ -98,11 +98,37 @@ export const listCommand = new Command('list')
       
       // Special handling for endpoints
       if (options?.type === 'endpoint' || searchPattern?.toLowerCase().includes('endpoint')) {
+        // Filter out likely false positives (help files, docs, etc.)
+        const realEndpoints = symbols.filter(sym => 
+          !sym.filePath.includes('help-text') && 
+          !sym.filePath.includes('README') &&
+          !sym.filePath.includes('doc') &&
+          // Only include if it looks like a real API route
+          (sym.signature?.includes('app.') || 
+           sym.signature?.includes('router.') || 
+           sym.signature?.includes('@Get') || 
+           sym.signature?.includes('@Post') ||
+           sym.signature?.includes('route') ||
+           sym.filePath.includes('controller') ||
+           sym.filePath.includes('route') ||
+           sym.filePath.includes('api'))
+        );
+        
+        if (realEndpoints.length === 0) {
+          console.log(chalk.yellow('No API endpoints found'));
+          console.log(chalk.gray('Endpoints are detected from:'));
+          console.log(chalk.gray('  • Express: app.get(), router.post()'));
+          console.log(chalk.gray('  • Decorators: @Get(), @Post()'));
+          console.log(chalk.gray('  • API route files'));
+          return;
+        }
+        
         console.log(chalk.bold('API Endpoints:'));
-        symbols.forEach(sym => {
+        realEndpoints.forEach(sym => {
           // Extract HTTP method and route from signature if available
-          const method = sym.signature?.match(/\.(get|post|put|delete|patch)\(/i)?.[1]?.toUpperCase() || 'GET';
-          const route = sym.signature?.match(/["']([^"']+)["']/)?.[1] || '/unknown';
+          const method = sym.signature?.match(/\.(get|post|put|delete|patch)\(/i)?.[1]?.toUpperCase() || 
+                        sym.signature?.match(/@(Get|Post|Put|Delete|Patch)/i)?.[1]?.toUpperCase() || 'GET';
+          const route = sym.signature?.match(/["']([^"']*\/[^"']*)["']/)?.[1] || `/${sym.name}`;
           console.log(chalk.cyan(`  ${method.padEnd(6)} ${route.padEnd(30)}`), chalk.gray(`${sym.filePath}:${sym.lineStart}`));
         });
       } else {
@@ -120,7 +146,8 @@ export const listCommand = new Command('list')
         }
         
         byType.forEach((syms, type) => {
-          console.log(chalk.cyan(`\n${type}s (${syms.length}):`));
+          const pluralType = pluralize(type);
+          console.log(chalk.cyan(`\n${pluralType} (${syms.length}):`));
           syms.forEach(sym => {
             const location = chalk.gray(`${sym.filePath}:${sym.lineStart}`);
             const isExact = expandedPattern && 
@@ -191,3 +218,26 @@ ${chalk.bold('Tips:')}
   • Use aliases for semantic grouping (@api, @data, @auth)
   • Combine with 'query' for detailed navigation
   • Use --type to filter by symbol type`);
+
+function pluralize(word: string): string {
+  const irregulars: Record<string, string> = {
+    'class': 'classes',
+    'interface': 'interfaces',
+    'property': 'properties'
+  };
+  
+  if (irregulars[word]) {
+    return irregulars[word];
+  }
+  
+  // Handle regular plurals
+  if (word.endsWith('s') || word.endsWith('sh') || word.endsWith('ch') || word.endsWith('x') || word.endsWith('z')) {
+    return word + 'es';
+  }
+  
+  if (word.endsWith('y') && !/[aeiou]y$/.test(word)) {
+    return word.slice(0, -1) + 'ies';
+  }
+  
+  return word + 's';
+}

@@ -28,7 +28,7 @@ export const impactCommand = new Command('impact')
       }
       
       const target = symbols[0];
-      const depth = parseInt(options.depth || '2');
+      // Note: depth option exists for future use but not currently implemented
       
       // Get direct callers (depth 1)
       const directCallers = db.getDatabase().prepare(`
@@ -121,14 +121,20 @@ export const impactCommand = new Command('impact')
         console.log(`  ${icon} ${color(change.action)}: ${change.description}`);
       });
       
-      // Recommended action
+      // Recommended action with better risk assessment
       if (directCallers.length === 0 && textRefs.length === 0) {
         console.log(chalk.green('\n✨ Safe to modify - no dependencies found'));
-      } else if (directCallers.length < 3 && textRefs.length < 5) {
-        console.log(chalk.yellow('\n⚡ Low risk - limited impact scope'));
-      } else {
+      } else if (directCallers.length === 0 && textRefs.length <= 10) {
+        // Only imports/type usage, no direct calls - medium risk
+        console.log(chalk.yellow('\n⚡ Medium risk - only import/type references'));
+        console.log(chalk.gray('Changes to public API may require import updates'));
+      } else if (directCallers.length < 5 && textRefs.length < 10) {
+        console.log(chalk.yellow('\n⚡ Low-Medium risk - limited usage'));
+      } else if (directCallers.length >= 5 || (directCallers.length > 0 && textRefs.length > 15)) {
         console.log(chalk.red('\n⚠️  High risk - widespread usage'));
         console.log(chalk.gray('Consider creating a compatibility layer'));
+      } else {
+        console.log(chalk.yellow('\n⚡ Medium risk - moderate usage'));
       }
       
     } catch (error) {
