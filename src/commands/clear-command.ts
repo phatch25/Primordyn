@@ -1,16 +1,14 @@
 import { Command } from 'commander';
-import { PrimordynDB } from '../database/index.js';
+import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { Indexer } from '../indexer/index.js';
 import chalk from 'chalk';
-import { getHelpText } from '../utils/help-texts.js';
 
 export const clearCommand = new Command('clear')
   .description('Clear the current index database')
   .option('-f, --force', 'Skip confirmation prompt')
-  .addHelpText('after', getHelpText('clear'))
   .action(async (options) => {
     try {
-      const db = new PrimordynDB();
+      const db = DatabaseConnectionPool.getConnection();
       const indexer = new Indexer(db);
       
       if (!options.force) {
@@ -30,8 +28,6 @@ export const clearCommand = new Command('clear')
       console.log();
       console.log(chalk.blue('💡 Next step:'));
       console.log(`  Run ${chalk.cyan('primordyn index')} to rebuild the index`);
-      
-      db.close();
       
     } catch (error) {
       console.error(chalk.red('❌ Failed to clear index:'), error instanceof Error ? error.message : error);

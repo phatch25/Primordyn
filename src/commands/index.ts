@@ -5,13 +5,8 @@ import { listCommand } from './list-command.js';
 import { statsCommand } from './stats-command.js';
 import { clearCommand } from './clear-command.js';
 import { aliasCommand } from './alias-command.js';
-import { endpointsCommand } from './endpoints-command.js';
-import { unusedCommand } from './unused-command.js';
 import { impactCommand } from './impact-command.js';
-import { duplicatesCommand } from './duplicates-command.js';
 import { graphCommand } from './graph-command.js';
-import { circularCommand } from './circular-command.js';
-import { patternsCommand } from './patterns-command.js';
 import chalk from 'chalk';
 
 export function createCLI(): Command {
@@ -43,20 +38,16 @@ ${chalk.bold('Examples:')}
   ${chalk.gray('# Advanced usage')}
   $ primordyn query UserService --show-graph     ${chalk.gray('# Show dependencies')}
   $ primordyn query UserService --impact         ${chalk.gray('# Show impact analysis')}
-  $ primordyn endpoints                          ${chalk.gray('# List all API endpoints')}
+  $ primordyn list --type endpoint               ${chalk.gray('# List all API endpoints')}
 
-  ${chalk.gray('# Code intelligence')}
-  $ primordyn unused                            ${chalk.gray('# Find dead code')}
-  $ primordyn impact AuthService                ${chalk.gray('# Analyze change impact')}
-  $ primordyn duplicates --min-lines 10         ${chalk.gray('# Find duplicate code')}
+  ${chalk.gray('# Analysis')}
   $ primordyn graph UserService                 ${chalk.gray('# Visualize dependencies')}
-  $ primordyn circular                          ${chalk.gray('# Detect circular dependencies')}
-  $ primordyn patterns UserService              ${chalk.gray('# Find similar code patterns')}
+  $ primordyn impact AuthService                ${chalk.gray('# Analyze change impact')}
 
 ${chalk.bold('Workflow:')}
   1. Use ${chalk.cyan('list')} to discover and search (fuzzy matching, patterns)
   2. Use ${chalk.cyan('query')} to get detailed context (exact retrieval)
-  3. Use ${chalk.cyan('impact/unused/duplicates')} for refactoring intelligence
+  3. Use ${chalk.cyan('graph/impact')} for refactoring decisions
 `);
 
   // Add essential AI-focused commands
@@ -66,15 +57,10 @@ ${chalk.bold('Workflow:')}
   program.addCommand(statsCommand);
   program.addCommand(clearCommand);
   program.addCommand(aliasCommand);
-  program.addCommand(endpointsCommand);
   
-  // Add code intelligence commands
-  program.addCommand(unusedCommand);
-  program.addCommand(impactCommand);
-  program.addCommand(duplicatesCommand);
+  // Add analysis commands
   program.addCommand(graphCommand);
-  program.addCommand(circularCommand);
-  program.addCommand(patternsCommand);
+  program.addCommand(impactCommand);
 
   // Global error handler
   program.exitOverride((err) => {

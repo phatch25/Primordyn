@@ -1,332 +1,217 @@
 import { Command } from 'commander';
-import { PrimordynDB } from '../database/index.js';
+import { DatabaseConnectionPool } from '../database/connection-pool.js';
+import { ContextRetriever } from '../retriever/index.js';
 import chalk from 'chalk';
-import ora from 'ora';
-import { getHelpText } from '../utils/help-texts.js';
-import type { TargetSymbolResult, TextSearchResult, BreakingChangeResult } from '../types/database.js';
-import { withDefaults } from '../config/defaults.js';
 
-interface ImpactNode {
-  symbol_name: string;
-  file_path: string;
-  relative_path: string;
-  type: string;
-  depth: number;
-  reference_count: number;
-  line_start: number;
-}
-
-export const impactCommand =
-  new Command('impact')
-    .description('Analyze the impact of changing a symbol')
-    .argument('<symbol>', 'Symbol name to analyze')
-    .option('-d, --depth <number>', 'Maximum depth to traverse (default: 3)', parseInt, 3)
-    .option('--show-path', 'Show the dependency path for each affected symbol')
-    .option('--suggest-order', 'Suggest migration order based on risk')
-    .option('--format <type>', 'Output format: text, json, tree (default: text)', 'text')
-    .addHelpText('after', getHelpText('impact'))
-    .action(async (symbolName: string, options) => {
-      const spinner = ora('Analyzing change impact...').start();
+export const impactCommand = new Command('impact')
+  .description('Analyze what breaks if you change a symbol')
+  .argument('<symbol>', 'Symbol to analyze')
+  .option('--depth <n>', 'How deep to trace impacts (default: 2)', '2')
+  .option('--format <type>', 'Output format: text, json (default: text)', 'text')
+  .action(async (symbolName: string, options: any) => {
+    try {
+      const db = DatabaseConnectionPool.getConnection();
+      const retriever = new ContextRetriever(db);
       
-      try {
-        // Apply smart defaults
-        const impactDefaults = withDefaults('impact', {
-          depth: options.depth || 3,
-          format: options.format || 'text',
-          includeTests: options.includeTests !== false  // Default true for impact
-        });
-        
-        const db = new PrimordynDB();
-        // const projectRoot = process.cwd();
-        // const dbPath = join(projectRoot, '.primordyn', 'context.db');
-        
-        const dbInfo = await db.getDatabaseInfo();
-        if (dbInfo.fileCount === 0) {
-          spinner.fail(chalk.red('No index found. Run "primordyn index" first.'));
-          process.exit(1);
-        }
-        
-        // Find the target symbol
-        const targetStmt = db.getDatabase().prepare(`
-          SELECT s.*, f.relative_path, f.path as file_path 
-          FROM symbols s
-          JOIN files f ON s.file_id = f.id
-          WHERE s.name = ?
-          LIMIT 1
-        `);
-        const targetSymbol = targetStmt.get(symbolName) as TargetSymbolResult | undefined;
-        
-        if (!targetSymbol) {
-          spinner.fail(chalk.red(`Symbol "${symbolName}" not found`));
-          db.close();
-          process.exit(1);
-        }
-        
-        // BFS to find all affected symbols up to max depth
-        const visited = new Set<string>();
-        const queue: ImpactNode[] = [];
-        const impactMap = new Map<number, ImpactNode[]>();
-        
-        // Get direct references (depth 1) - improved query
-        // First try with symbol ID, then fall back to name matching
-        const directRefsStmt = db.getDatabase().prepare(`
-          SELECT DISTINCT
-            s.name as symbol_name,
-            f.path as file_path,
-            s.type,
-            s.line_start,
-            f.relative_path,
-            COUNT(*) as reference_count
-          FROM call_graph cg
-          JOIN symbols s ON cg.caller_symbol_id = s.id
-          JOIN files f ON s.file_id = f.id
-          WHERE cg.callee_symbol_id = ?
-             OR cg.callee_name = ?
-          GROUP BY s.id
-          
-          UNION
-          
-          SELECT DISTINCT
-            s.name as symbol_name,
-            f.path as file_path,
-            s.type,
-            s.line_start,
-            f.relative_path,
-            COUNT(*) as reference_count
-          FROM call_graph cg
-          JOIN symbols s ON cg.caller_symbol_id = s.id
-          JOIN files f ON s.file_id = f.id
-          WHERE cg.callee_name = ?
-          GROUP BY s.id
-        `);
-        
-        const directRefs = directRefsStmt.all(targetSymbol.id, symbolName, symbolName) as ImpactNode[];
-        directRefs.forEach(ref => {
-          ref.depth = 1;
-          queue.push(ref);
-          visited.add(`${ref.file_path}:${ref.symbol_name}`);
-          if (!impactMap.has(1)) impactMap.set(1, []);
-          impactMap.get(1)!.push(ref);
-        });
-        
-        // BFS for deeper impacts  
-        while (queue.length > 0 && queue[0].depth < impactDefaults.depth) {
-          const current = queue.shift()!;
-          
-          const nextRefsStmt = db.getDatabase().prepare(`
-            SELECT 
-              s.name as symbol_name,
-              f.path as file_path,
-              s.type,
-              s.line_start,
-              f.relative_path,
-              COUNT(*) as reference_count
-            FROM call_graph cg
-            JOIN symbols s ON cg.caller_symbol_id = s.id
-            JOIN files f ON s.file_id = f.id
-            WHERE cg.callee_symbol_id = (
-              SELECT s.id FROM symbols s 
-              JOIN files f ON s.file_id = f.id
-              WHERE s.name = ? AND f.path = ? 
-              LIMIT 1
-            )
-            GROUP BY s.id
-          `);
-          
-          const nextRefs = nextRefsStmt.all(current.symbol_name, current.file_path) as ImpactNode[];
-          
-          nextRefs.forEach(ref => {
-            const key = `${ref.file_path}:${ref.symbol_name}`;
-            if (!visited.has(key)) {
-              ref.depth = current.depth + 1;
-              queue.push(ref);
-              visited.add(key);
-              if (!impactMap.has(ref.depth)) impactMap.set(ref.depth, []);
-              impactMap.get(ref.depth)!.push(ref);
-            }
-          });
-        }
-        
-        // If no dependencies found via call graph, try text-based search
-        if (directRefs.length === 0) {
-          const textSearchStmt = db.getDatabase().prepare(`
-            SELECT DISTINCT
-              f.path as file_path,
-              f.relative_path,
-              f.content
-            FROM files f
-            WHERE f.content LIKE ?
-              AND f.id != (SELECT file_id FROM symbols WHERE id = ?)
-            LIMIT 50
-          `);
-          
-          const searchPattern = `%${symbolName}%`;
-          const textResults = textSearchStmt.all(searchPattern, targetSymbol.id) as TextSearchResult[];
-          
-          // Analyze text results for actual usage
-          textResults.forEach(file => {
-            const lines = file.content.split('\n');
-            const usageLines: number[] = [];
-            
-            lines.forEach((line: string, idx: number) => {
-              // Look for actual usage patterns (not just comments)
-              if (line.includes(symbolName) && 
-                  !line.trim().startsWith('#') && 
-                  !line.trim().startsWith('//') &&
-                  !line.trim().startsWith('*')) {
-                usageLines.push(idx + 1);
-              }
-            });
-            
-            if (usageLines.length > 0) {
-              const impactNode: ImpactNode = {
-                symbol_name: `<text reference>`,
-                file_path: file.file_path,
-                relative_path: file.relative_path,
-                type: 'reference',
-                line_start: usageLines[0],
-                reference_count: usageLines.length,
-                depth: 1
-              };
-              
-              if (!impactMap.has(1)) impactMap.set(1, []);
-              impactMap.get(1)!.push(impactNode);
-            }
-          });
-        }
-        
-        spinner.stop();
-        
-        // Calculate statistics
-        const totalImpacted = Array.from(impactMap.values()).flat().length;
-        const impactedFiles = new Set(Array.from(impactMap.values()).flat().map(n => n.file_path)).size;
-        
-        if (options.format === 'json') {
-          console.log(JSON.stringify({
-            target: symbolName,
-            totalImpacted,
-            impactedFiles,
-            impacts: Object.fromEntries(impactMap)
-          }, null, 2));
-          db.close();
-          return;
-        }
-        
-        // Display results
-        console.log(chalk.yellow(`\n🎯 Change Impact Analysis: ${chalk.white(symbolName)}\n`));
-        console.log(chalk.gray(`Target: ${targetSymbol.type} ${symbolName} in ${targetSymbol.relative_path}:${targetSymbol.line_start}\n`));
-        
-        if (totalImpacted === 0) {
-          console.log(chalk.yellow('⚠️  No direct dependencies found in call graph'));
-          console.log(chalk.gray('This could mean:'));
-          console.log(chalk.gray('  • The symbol is unused'));
-          console.log(chalk.gray('  • It\'s only used via dynamic calls/imports'));
-          console.log(chalk.gray('  • It\'s called from external code'));
-          console.log(chalk.gray('  • The index needs updating (run "primordyn index")'));
-          
-          // Try one more fallback - simple text search
-          console.log(chalk.blue('\nSearching for text references...'));
-          const simpleSearchStmt = db.getDatabase().prepare(`
-            SELECT COUNT(*) as count
-            FROM files f
-            WHERE f.content LIKE ?
-              AND f.id != (SELECT file_id FROM symbols WHERE id = ?)
-          `);
-          const result = simpleSearchStmt.get(`%${symbolName}%`, targetSymbol.id) as {count: number};
-          
-          if (result.count > 0) {
-            console.log(chalk.yellow(`Found ${result.count} files that mention "${symbolName}"`));
-            console.log(chalk.gray('Use "primordyn query" with --include-callers to see text references'));
-          } else {
-            console.log(chalk.green('No text references found either - symbol appears unused'));
-          }
-          
-          db.close();
-          return;
-        }
-        
-        // Risk assessment
-        console.log(chalk.cyan('📊 RISK ASSESSMENT:'));
-        
-        const risks: Array<{symbol: ImpactNode, risk: string, score: number}> = [];
-        
-        for (const [depth, nodes] of impactMap) {
-          for (const node of nodes) {
-            const riskScore = (4 - depth) * node.reference_count;
-            let risk = 'Low';
-            if (riskScore > 10) risk = 'High';
-            else if (riskScore > 5) risk = 'Medium';
-            
-            risks.push({ symbol: node, risk, score: riskScore });
-          }
-        }
-        
-        // Sort by risk score
-        risks.sort((a, b) => b.score - a.score);
-        
-        // Group by risk level
-        const highRisk = risks.filter(r => r.risk === 'High');
-        const mediumRisk = risks.filter(r => r.risk === 'Medium');
-        const lowRisk = risks.filter(r => r.risk === 'Low');
-        
-        if (highRisk.length > 0) {
-          console.log(chalk.red('\n  High Risk:'));
-          highRisk.slice(0, 5).forEach(r => {
-            console.log(`    ${chalk.red('●')} ${r.symbol.relative_path}:${r.symbol.line_start} - ${r.symbol.type} ${r.symbol.symbol_name} (${r.symbol.reference_count} refs, depth ${r.symbol.depth})`);
-          });
-        }
-        
-        if (mediumRisk.length > 0) {
-          console.log(chalk.yellow('\n  Medium Risk:'));
-          mediumRisk.slice(0, 5).forEach(r => {
-            console.log(`    ${chalk.yellow('●')} ${r.symbol.relative_path}:${r.symbol.line_start} - ${r.symbol.type} ${r.symbol.symbol_name} (${r.symbol.reference_count} refs, depth ${r.symbol.depth})`);
-          });
-        }
-        
-        if (lowRisk.length > 0) {
-          console.log(chalk.green('\n  Low Risk:'));
-          lowRisk.slice(0, 5).forEach(r => {
-            console.log(`    ${chalk.green('●')} ${r.symbol.relative_path}:${r.symbol.line_start} - ${r.symbol.type} ${r.symbol.symbol_name} (${r.symbol.reference_count} refs, depth ${r.symbol.depth})`);
-          });
-        }
-        
-        if (options.suggestOrder) {
-          console.log(chalk.cyan('\n🔄 SUGGESTED MIGRATION ORDER:'));
-          
-          // Reverse the risk order for migration (start with lowest risk)
-          const migrationOrder = [...risks].reverse();
-          
-          migrationOrder.slice(0, 10).forEach((r, index) => {
-            const riskColor = r.risk === 'High' ? chalk.red : r.risk === 'Medium' ? chalk.yellow : chalk.green;
-            console.log(`  ${index + 1}. ${r.symbol.relative_path} - ${r.symbol.symbol_name} ${riskColor(`[${r.risk}]`)}`);
-          });
-          
-          console.log(chalk.gray('\n  💡 Start with low-risk changes and work up to high-risk ones'));
-        }
-        
-        // Summary
-        console.log(chalk.yellow('\n📈 IMPACT SUMMARY:'));
-        console.log(`  • ${chalk.white(totalImpacted)} symbols affected`);
-        console.log(`  • ${chalk.white(impactedFiles)} files impacted`);
-        console.log(`  • ${chalk.red(highRisk.length)} high risk, ${chalk.yellow(mediumRisk.length)} medium risk, ${chalk.green(lowRisk.length)} low risk`);
-        
-        // Breaking change detection
-        const breakingChangeStmt = db.getDatabase().prepare(`
-          SELECT COUNT(DISTINCT caller_symbol_id) as callers
-          FROM call_graph
-          WHERE callee_symbol_id = (SELECT id FROM symbols WHERE name = ? LIMIT 1)
-        `);
-        const breakingResult = breakingChangeStmt.get(symbolName) as BreakingChangeResult | undefined;
-        const callers = breakingResult?.callers ?? 0;
-        
-        console.log(chalk.cyan('\n⚡ BREAKING CHANGE DETECTION:'));
-        console.log(`  • Method signature changes would affect ${chalk.white(callers)} direct callers`);
-        console.log(`  • Adding optional parameters: ${chalk.green('safe')} for all callers`);
-        console.log(`  • Removing/renaming: ${chalk.red('breaking')} for ${callers} callers`);
-        
-        db.close();
-      } catch (error) {
-        spinner.fail(chalk.red(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      // Check index exists
+      const dbInfo = await db.getDatabaseInfo();
+      if (dbInfo.fileCount === 0) {
+        console.log(chalk.red('No index found. Run "primordyn index" first.'));
         process.exit(1);
       }
+      
+      // Find the symbol
+      const symbols = await retriever.findSymbol(symbolName, {});
+      if (symbols.length === 0) {
+        console.log(chalk.red(`Symbol "${symbolName}" not found`));
+        process.exit(1);
+      }
+      
+      const target = symbols[0];
+      const depth = parseInt(options.depth || '2');
+      
+      // Get direct callers (depth 1)
+      const directCallers = db.getDatabase().prepare(`
+        SELECT DISTINCT
+          s.name as symbol_name,
+          s.type,
+          f.relative_path as file_path,
+          s.line_start,
+          cg.line_number as call_line
+        FROM call_graph cg
+        JOIN symbols s ON cg.caller_symbol_id = s.id
+        JOIN files f ON s.file_id = f.id
+        WHERE cg.callee_symbol_id = ?
+        ORDER BY f.relative_path, s.line_start
+      `).all(target.id) as any[];
+      
+      // Get text references (imports, types, etc)
+      const textRefs = db.getDatabase().prepare(`
+        SELECT DISTINCT
+          f.relative_path as file_path,
+          COUNT(*) as ref_count
+        FROM files f
+        WHERE f.content LIKE '%' || ? || '%'
+          AND f.id != (SELECT file_id FROM symbols WHERE id = ?)
+        GROUP BY f.id
+        ORDER BY ref_count DESC
+        LIMIT 20
+      `).all(symbolName, target.id) as any[];
+      
+      // Analyze breaking changes
+      const breakingChanges = analyzeBreaking(target, directCallers, textRefs);
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify({
+          target: {
+            name: target.name,
+            type: target.type,
+            location: `${target.filePath}:${target.lineStart}`
+          },
+          directCallers: directCallers.length,
+          textReferences: textRefs.reduce((sum, r) => sum + r.ref_count, 0),
+          breakingChanges
+        }, null, 2));
+        return;
+      }
+      
+      // Text output - focused on what breaks
+      console.log(chalk.bold(`\nImpact Analysis: ${target.name}`));
+      console.log(chalk.gray(`${target.filePath}:${target.lineStart}`));
+      console.log(chalk.gray('─'.repeat(50)));
+      
+      // Direct impact (who calls this)
+      if (directCallers.length > 0) {
+        console.log(chalk.yellow(`\n${directCallers.length} direct callers:`));
+        const byFile = new Map<string, typeof directCallers>();
+        directCallers.forEach(caller => {
+          if (!byFile.has(caller.file_path)) {
+            byFile.set(caller.file_path, []);
+          }
+          byFile.get(caller.file_path)!.push(caller);
+        });
+        
+        for (const [file, callers] of byFile) {
+          console.log(`\n  ${chalk.cyan(file)}`);
+          callers.forEach(c => {
+            console.log(`    • ${c.symbol_name} (line ${c.call_line})`);
+          });
+        }
+      } else {
+        console.log(chalk.green('\nNo direct callers found'));
+      }
+      
+      // Text references (imports, type usage, etc)
+      if (textRefs.length > 0) {
+        const totalRefs = textRefs.reduce((sum, r) => sum + r.ref_count, 0);
+        console.log(chalk.yellow(`\n${totalRefs} text references in ${textRefs.length} files:`));
+        textRefs.slice(0, 10).forEach(ref => {
+          console.log(`  • ${ref.file_path} (${ref.ref_count} references)`);
+        });
+        if (textRefs.length > 10) {
+          console.log(chalk.gray(`  ... and ${textRefs.length - 10} more files`));
+        }
+      }
+      
+      // Breaking change analysis
+      console.log(chalk.bold('\n🔨 Breaking Changes:'));
+      breakingChanges.forEach(change => {
+        const icon = change.safe ? '✅' : '⚠️';
+        const color = change.safe ? chalk.green : chalk.yellow;
+        console.log(`  ${icon} ${color(change.action)}: ${change.description}`);
+      });
+      
+      // Recommended action
+      if (directCallers.length === 0 && textRefs.length === 0) {
+        console.log(chalk.green('\n✨ Safe to modify - no dependencies found'));
+      } else if (directCallers.length < 3 && textRefs.length < 5) {
+        console.log(chalk.yellow('\n⚡ Low risk - limited impact scope'));
+      } else {
+        console.log(chalk.red('\n⚠️  High risk - widespread usage'));
+        console.log(chalk.gray('Consider creating a compatibility layer'));
+      }
+      
+    } catch (error) {
+      console.error(chalk.red('Impact analysis failed:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  })
+  .addHelpText('after', `
+${chalk.bold('Examples:')}
+  ${chalk.gray('# Analyze impact of changing a function')}
+  $ primordyn impact processData
+  
+  ${chalk.gray('# Check deeper transitive impacts')}  
+  $ primordyn impact UserService --depth 3
+  
+  ${chalk.gray('# Get JSON for tooling')}
+  $ primordyn impact AuthService --format json
+
+${chalk.bold('What it shows:')}
+  • Direct callers (who calls this function/class)
+  • Text references (imports, type usage, comments)
+  • Breaking change scenarios
+  • Risk assessment
+
+${chalk.bold('Use before:')}
+  • Renaming symbols
+  • Changing signatures
+  • Removing functionality
+  • Major refactoring`);
+
+function analyzeBreaking(target: any, directCallers: any[], textRefs: any[]) {
+  const changes = [];
+  
+  // Analyze based on symbol type
+  if (target.type === 'function' || target.type === 'method') {
+    changes.push({
+      action: 'Add optional parameter',
+      safe: true,
+      description: 'Backward compatible'
     });
+    changes.push({
+      action: 'Remove/rename',
+      safe: false,
+      description: `Breaks ${directCallers.length} call sites`
+    });
+    changes.push({
+      action: 'Change return type',
+      safe: false,
+      description: 'May break type expectations'
+    });
+  } else if (target.type === 'class') {
+    changes.push({
+      action: 'Add method/property',
+      safe: true,
+      description: 'Backward compatible'
+    });
+    changes.push({
+      action: 'Remove method',
+      safe: false,
+      description: `Check ${directCallers.length} usage sites`
+    });
+    changes.push({
+      action: 'Rename class',
+      safe: false,
+      description: `Update ${textRefs.length} files with imports`
+    });
+  } else if (target.type === 'interface' || target.type === 'type') {
+    changes.push({
+      action: 'Add optional property',
+      safe: true,
+      description: 'Backward compatible'
+    });
+    changes.push({
+      action: 'Add required property',
+      safe: false,
+      description: 'Breaks all implementations'
+    });
+    changes.push({
+      action: 'Remove property',
+      safe: false,
+      description: 'May break consumers'
+    });
+  }
+  
+  return changes;
+}
