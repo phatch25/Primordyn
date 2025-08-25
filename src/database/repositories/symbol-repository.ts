@@ -84,7 +84,10 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
     ignoreExamples?: boolean;
     ignoreConfig?: boolean;
     customIgnore?: string[];
+    strict?: boolean;
+    ignoreExported?: boolean;
   } = {}): SymbolRow[] {
+    // More comprehensive query that checks both call_graph and references
     let query = `
       SELECT 
         s.id,
@@ -94,39 +97,96 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
         s.line_start,
         s.line_end,
         f.relative_path,
-        (s.line_end - s.line_start + 1) as line_count
+        f.language,
+        (s.line_end - s.line_start + 1) as line_count,
+        -- Check if symbol is exported
+        CASE 
+          WHEN s.metadata LIKE '%"exported":true%' THEN 1
+          ELSE 0
+        END as is_exported
       FROM symbols s
       JOIN files f ON s.file_id = f.id
       WHERE s.id NOT IN (
+        -- Check call graph with both ID and name
         SELECT DISTINCT callee_symbol_id 
         FROM call_graph 
         WHERE callee_symbol_id IS NOT NULL
+        
+        UNION
+        
+        -- Also check by name in case IDs don't match
+        SELECT DISTINCT s2.id
+        FROM call_graph cg
+        JOIN symbols s2 ON cg.callee_name = s2.name
+        WHERE cg.callee_name IS NOT NULL
       )
-      -- Filter out common false positives
+      -- Always filter out imports/exports
+      AND s.type NOT IN ('export', 'import', 'require')
+    `;
+    
+    // Apply filters based on strict mode
+    if (!options.strict) {
+      query += `
+      -- Filter out common false positives (non-strict mode)
       AND s.name NOT IN (
         'default', 'exports', 'module.exports',
-        -- Common entry points and configs
-        'main', 'index', 'app', 'App', 'config', 'Config',
-        -- React components that may be lazy loaded
-        'render', 'Component', 'Provider',
-        -- CLI and scripts
-        'cli', 'run', 'start', 'build', 'serve',
-        -- Event handlers that might be bound dynamically
-        'onClick', 'onChange', 'onSubmit', 'onLoad', 'onError',
-        -- Common lifecycle methods
-        'constructor', 'componentDidMount', 'componentWillUnmount',
-        'useEffect', 'useState', 'useMemo', 'useCallback'
+        -- Common entry points (all languages)
+        'main', 'index', 'app', 'App', 'Main',
+        -- Python special methods and common patterns
+        '__init__', '__main__', '__str__', '__repr__', '__eq__',
+        '__hash__', '__call__', '__enter__', '__exit__', '__len__',
+        '__getitem__', '__setitem__', '__delitem__', '__iter__',
+        '__next__', '__contains__', '__add__', '__sub__', '__mul__',
+        '__div__', '__mod__', '__pow__', '__lt__', '__le__', '__gt__',
+        '__ge__', '__ne__', '__bool__', '__getattr__', '__setattr__',
+        '__delattr__', '__new__', '__del__', '__bytes__', '__format__',
+        '__sizeof__', '__reduce__', '__reduce_ex__', '__getstate__',
+        '__setstate__', '__dir__', '__class_getitem__',
+        -- Python common decorators and class methods
+        'setUp', 'tearDown', 'setUpClass', 'tearDownClass',
+        'classmethod', 'staticmethod', 'property',
+        -- JavaScript/TypeScript React hooks and lifecycle
+        'useEffect', 'useState', 'useMemo', 'useCallback', 'useReducer',
+        'useContext', 'useRef', 'useLayoutEffect', 'useImperativeHandle',
+        'useDebugValue', 'useDeferredValue', 'useTransition', 'useId',
+        'componentDidMount', 'componentDidUpdate', 'componentWillUnmount',
+        'shouldComponentUpdate', 'componentDidCatch', 'getDerivedStateFromProps',
+        'getSnapshotBeforeUpdate', 'render',
+        -- Vue.js lifecycle hooks
+        'beforeCreate', 'created', 'beforeMount', 'mounted',
+        'beforeUpdate', 'updated', 'beforeDestroy', 'destroyed',
+        'activated', 'deactivated', 'errorCaptured',
+        -- Angular lifecycle hooks
+        'ngOnInit', 'ngOnChanges', 'ngDoCheck', 'ngAfterContentInit',
+        'ngAfterContentChecked', 'ngAfterViewInit', 'ngAfterViewChecked',
+        'ngOnDestroy',
+        -- Go special methods
+        'init', 'String', 'Error',
+        -- Rust special methods and traits
+        'new', 'default', 'fmt', 'clone', 'drop', 'from', 'into',
+        -- Java special methods
+        'toString', 'equals', 'hashCode', 'finalize', 'clone',
+        'compareTo', 'main'
       )
-      AND s.type NOT IN ('export', 'import', 'require')
-      -- Filter out symbols that start with underscore (private convention)
-      AND s.name NOT LIKE '\_%'
-      -- Filter out test helpers and mocks
+      -- Filter out Python private (starts with _) but not dunder methods
+      AND NOT (f.language = 'python' AND s.name LIKE '\_%' AND s.name NOT LIKE '\_\_%')
+      -- Filter out test helpers
       AND s.name NOT LIKE '%Mock%'
       AND s.name NOT LIKE '%Stub%'
+      AND s.name NOT LIKE '%Spy%'
       AND s.name NOT LIKE '%Fake%'
-      AND s.name NOT LIKE '%Test%'
-      AND s.name NOT LIKE '%Spec%'
-    `;
+      -- Filter out common generated code patterns
+      AND s.name NOT LIKE '%_pb2%'  -- Protocol buffers
+      AND s.name NOT LIKE '%_grpc%' -- gRPC
+      AND s.name NOT LIKE '%.g.%'   -- Generated files
+      `;
+    } else {
+      // Strict mode - minimal filtering
+      query += `
+      -- Minimal filtering in strict mode
+      AND s.name NOT IN ('default', 'exports', 'module.exports')
+      `;
+    }
 
     const params: any[] = [];
     const conditions: string[] = [];
@@ -142,12 +202,25 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
     }
 
     if (options.ignoreTests !== false) {
-      // Default to true - ignore test files
+      // Default to true - ignore test files for all languages
       conditions.push("f.relative_path NOT LIKE '%test%'");
       conditions.push("f.relative_path NOT LIKE '%spec%'");
       conditions.push("f.relative_path NOT LIKE '%__tests__%'");
       conditions.push("f.relative_path NOT LIKE '%.test.%'");
       conditions.push("f.relative_path NOT LIKE '%.spec.%'");
+      // Python test patterns
+      conditions.push("f.relative_path NOT LIKE '%test_%'");
+      conditions.push("f.relative_path NOT LIKE '%_test.py'");
+      conditions.push("f.relative_path NOT LIKE '%/tests/%'");
+      // Go test patterns
+      conditions.push("f.relative_path NOT LIKE '%_test.go'");
+      // Rust test patterns
+      conditions.push("f.relative_path NOT LIKE '%/tests.rs'");
+      conditions.push("f.relative_path NOT LIKE '%_test.rs'");
+      // Java test patterns
+      conditions.push("f.relative_path NOT LIKE '%Test.java'");
+      conditions.push("f.relative_path NOT LIKE '%Tests.java'");
+      conditions.push("f.relative_path NOT LIKE '%/test/%'");
     }
 
     if (options.ignoreDocs !== false) {
@@ -193,6 +266,17 @@ export class SymbolRepository extends BaseRepository<SymbolRow> {
     if (options.minLines) {
       conditions.push('(s.line_end - s.line_start + 1) >= ?');
       params.push(options.minLines);
+    }
+
+    // Filter out exported symbols by default (they might be used externally)
+    if (options.ignoreExported !== false) {
+      conditions.push(`(
+        s.metadata IS NULL 
+        OR s.metadata NOT LIKE '%"exported":true%'
+        OR s.metadata NOT LIKE '%"isExported":true%'
+      )`);
+      // Also check common export patterns in symbol names/types
+      conditions.push("s.type NOT IN ('export', 'exported_function', 'exported_class', 'public_method', 'public_function')");
     }
 
     if (conditions.length > 0) {

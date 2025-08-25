@@ -23,7 +23,7 @@ export const unusedCommand =
     .description('Find unused symbols (dead code) in the codebase')
     .option('-t, --type <type>', 'Filter by symbol type (function, class, interface, etc.)')
     .option('-f, --file <pattern>', 'Filter by file pattern')
-    .option('--show-exports', 'Include exported symbols that are never imported')
+    .option('--show-exports', 'Include exported symbols (they might be used externally)')
     .option('--include-tests', 'Include test files when checking usage')
     .option('--include-docs', 'Include documentation files')
     .option('--include-examples', 'Include example files')
@@ -47,124 +47,19 @@ export const unusedCommand =
           process.exit(1);
         }
         
-        // Build the query with improved filtering
-        let query = `
-          SELECT 
-            s.id,
-            s.name,
-            s.type,
-            f.path as file_path,
-            s.line_start,
-            s.line_end,
-            f.relative_path,
-            s.signature,
-            (s.line_end - s.line_start + 1) as line_count,
-            -- Check if symbol is exported
-            CASE 
-              WHEN s.metadata LIKE '%"exported":true%' THEN 1
-              WHEN s.name IN (
-                SELECT DISTINCT name FROM symbols 
-                WHERE type = 'export' AND file_id = s.file_id
-              ) THEN 1
-              ELSE 0
-            END as is_exported
-          FROM symbols s
-          JOIN files f ON s.file_id = f.id
-          WHERE s.id NOT IN (
-            SELECT DISTINCT callee_symbol_id 
-            FROM call_graph 
-            WHERE callee_symbol_id IS NOT NULL
-          )
-        `;
-        
-        // Apply base filters unless in strict mode
-        if (!options.strict) {
-          query += `
-          AND s.name NOT IN (
-            'default', 'exports', 'module.exports',
-            -- Common entry points
-            'main', 'index', 'app', 'App', 'config', 'Config',
-            -- CLI and scripts
-            'cli', 'run', 'start', 'build', 'serve',
-            -- React/Vue/Angular lifecycle
-            'render', 'Component', 'Provider',
-            'constructor', 'ngOnInit', 'mounted', 'created'
-          )
-          AND s.type NOT IN ('export', 'import', 'require')
-          AND s.name NOT LIKE '\_%' -- Private convention
-          AND s.name NOT LIKE '%Mock%'
-          AND s.name NOT LIKE '%Stub%'
-          `;
-        } else {
-          query += `
-          AND s.name NOT IN ('default', 'exports', 'module.exports')
-          AND s.type NOT IN ('export', 'import', 'require')
-          `;
-        }
-        
-        const params: any[] = [];
-        const conditions: string[] = [];
-        
-        if (options.type) {
-          conditions.push('s.type = ?');
-          params.push(options.type);
-        }
-        
-        if (options.file) {
-          conditions.push('f.relative_path LIKE ?');
-          params.push(`%${options.file}%`);
-        }
-        
-        // Note: is_exported field doesn't exist in new schema
-        
-        // File filtering - default to excluding test/doc/example files
-        if (!options.includeTests) {
-          conditions.push("f.relative_path NOT LIKE '%test%'");
-          conditions.push("f.relative_path NOT LIKE '%spec%'");
-          conditions.push("f.relative_path NOT LIKE '%__tests__%'");
-          conditions.push("f.relative_path NOT LIKE '%.test.%'");
-          conditions.push("f.relative_path NOT LIKE '%.spec.%'");
-        }
-        
-        if (!options.includeDocs) {
-          conditions.push("f.relative_path NOT LIKE '%/docs/%'");
-          conditions.push("f.relative_path NOT LIKE '%.md'");
-          conditions.push("f.relative_path NOT LIKE '%README%'");
-        }
-        
-        if (!options.includeExamples) {
-          conditions.push("f.relative_path NOT LIKE '%/examples/%'");
-          conditions.push("f.relative_path NOT LIKE '%/demo/%'");
-          conditions.push("f.relative_path NOT LIKE '%.example.%'");
-        }
-        
-        if (!options.includeConfig) {
-          conditions.push("f.relative_path NOT LIKE '%.config.%'");
-          conditions.push("f.relative_path NOT LIKE '%webpack.%'");
-          conditions.push("f.relative_path NOT LIKE '%vite.%'");
-        }
-        
-        // Custom ignore patterns
-        if (options.ignore && options.ignore.length > 0) {
-          for (const pattern of options.ignore) {
-            conditions.push('f.relative_path NOT LIKE ?');
-            params.push(`%${pattern}%`);
-          }
-        }
-        
-        if (options.minLines) {
-          conditions.push('(s.line_end - s.line_start + 1) >= ?');
-          params.push(options.minLines);
-        }
-        
-        if (conditions.length > 0) {
-          query += ' AND ' + conditions.join(' AND ');
-        }
-        
-        query += ' ORDER BY f.relative_path, s.line_start';
-        
-        const stmt = db.getDatabase().prepare(query);
-        const unusedSymbols = stmt.all(...params) as any[];
+        // Use the repository method with improved options
+        const unusedSymbols = db.symbols.findUnused({
+          type: options.type,
+          file: options.file,
+          ignoreTests: !options.includeTests,
+          ignoreDocs: !options.includeDocs,
+          ignoreExamples: !options.includeExamples,
+          ignoreConfig: !options.includeConfig,
+          ignoreExported: !options.showExports,
+          minLines: options.minLines,
+          customIgnore: options.ignore,
+          strict: options.strict
+        }) as any[]; // Cast as any[] since the query adds computed fields (line_count, is_exported)
         
         spinner.stop();
         

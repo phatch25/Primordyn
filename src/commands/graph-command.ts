@@ -22,6 +22,7 @@ export const graphCommand =
     .argument('<symbol>', 'Symbol name to graph')
     .option('-d, --depth <number>', 'Maximum depth to traverse (default: 3)', parseInt, 3)
     .option('--reverse', 'Show reverse dependencies (what depends on this)')
+    .option('--bidirectional', 'Show both callers and callees in a unified view')
     .option('--format <type>', 'Output format: ascii, dot, mermaid (default: ascii)', 'ascii')
     .option('--show-files', 'Include file names in the graph')
     .option('--show-signatures', 'Include function/method signatures in the graph')
@@ -61,7 +62,7 @@ export const graphCommand =
         // Build the dependency tree
         const visited = new Set<string>();
         
-        function buildTree(name: string, symbolId: number | null, depth: number, type?: string, file?: string, signature?: string, lineNumber?: number): GraphNode | null {
+        function buildTree(name: string, symbolId: number | null, depth: number, type?: string, file?: string, signature?: string, lineNumber?: number, reverse?: boolean): GraphNode | null {
           if (depth > options.depth) return null;
           
           const key = symbolId ? `id:${symbolId}` : `name:${name}`;
@@ -81,7 +82,9 @@ export const graphCommand =
           
           let deps: any[];
           if (symbolId) {
-            const query = options.reverse ? `
+            // Use the reverse parameter passed to the function
+            const isReverse = reverse !== undefined ? reverse : options.reverse;
+            const query = isReverse ? `
               SELECT DISTINCT
                 s.name,
                 s.type,
@@ -117,7 +120,8 @@ export const graphCommand =
             deps = stmt.all(symbolId) as any[];
           } else {
             // Fallback to name-based search
-            const query = options.reverse ? `
+            const isReverse = reverse !== undefined ? reverse : options.reverse;
+            const query = isReverse ? `
               SELECT DISTINCT
                 s.name,
                 s.type,
@@ -159,7 +163,7 @@ export const graphCommand =
           
           const children: GraphNode[] = [];
           for (const dep of deps) {
-            const child = buildTree(dep.name, dep.id, depth + 1, dep.type, dep.file, dep.signature, dep.line_start);
+            const child = buildTree(dep.name, dep.id, depth + 1, dep.type, dep.file, dep.signature, dep.line_start, reverse);
             if (child) {
               child.callCount = dep.call_count;
               children.push(child);
@@ -177,7 +181,52 @@ export const graphCommand =
           };
         }
         
-        const tree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start);
+        // Handle bidirectional graph
+        let tree: GraphNode | null;
+        if (options.bidirectional) {
+          // Build both caller and callee trees
+          visited.clear(); // Reset visited for callers
+          const callerTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, true);
+          
+          visited.clear(); // Reset visited for callees
+          const calleeTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, false);
+          
+          // Combine both trees into a unified structure
+          tree = {
+            name: targetSymbol.name,
+            type: targetSymbol.type,
+            file: targetSymbol.relative_path,
+            signature: targetSymbol.signature,
+            children: [],
+            depth: 0,
+            lineNumber: targetSymbol.line_start
+          };
+          
+          // Add callers as children with special marker
+          if (callerTree && callerTree.children.length > 0) {
+            tree.children.push({
+              name: '⬆️ CALLED BY',
+              type: 'section',
+              file: '',
+              children: callerTree.children,
+              depth: 1
+            });
+          }
+          
+          // Add callees as children with special marker
+          if (calleeTree && calleeTree.children.length > 0) {
+            tree.children.push({
+              name: '⬇️ CALLS',
+              type: 'section',
+              file: '',
+              children: calleeTree.children,
+              depth: 1
+            });
+          }
+        } else {
+          // Original single-direction tree
+          tree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, options.reverse);
+        }
         
         spinner.stop();
         
@@ -186,7 +235,7 @@ export const graphCommand =
           console.log('Tree structure:', JSON.stringify(tree, null, 2));
         }
         
-        if (!tree) {
+        if (!tree || (tree.children.length === 0 && !options.bidirectional)) {
           console.log(chalk.yellow('No dependencies found'));
           db.close();
           return;
@@ -247,13 +296,15 @@ function renderAsciiTree(node: GraphNode, options: any, prefix = '', isLast = tr
   
   // Build node label with type icon and metadata
   const typeIcon = getTypeIcon(node.type);
-  const fileInfo = options.showFiles && node.file ? 
+  const fileInfo = options.showFiles && node.file && node.type !== 'section' ? 
     chalk.gray(` [${node.file}:${node.lineNumber || '?'}]`) : '';
   const callInfo = node.callCount && node.callCount > 1 ? 
     chalk.yellow(` (×${node.callCount})`) : '';
   const circularInfo = node.isCircular ? chalk.red(' ⟲') : '';
   
-  const nodeLabel = `${typeIcon} ${node.name}${callInfo}${circularInfo}${fileInfo}`;
+  const nodeLabel = node.type === 'section' 
+    ? node.name  // Section headers don't need icons or metadata
+    : `${typeIcon} ${node.name}${callInfo}${circularInfo}${fileInfo}`;
   
   // Root node
   if (node.depth === 0) {
@@ -269,7 +320,10 @@ function renderAsciiTree(node: GraphNode, options: any, prefix = '', isLast = tr
     
     // Apply color based on node type and state
     let color = chalk.white;
-    if (node.isCircular) {
+    if (node.type === 'section') {
+      // Special handling for section headers
+      color = chalk.yellow.bold;
+    } else if (node.isCircular) {
       color = chalk.red;
     } else if (node.type === 'function' || node.type === 'method') {
       color = chalk.green;
@@ -324,7 +378,8 @@ function getTypeIcon(type: string): string {
     'type': '𝑡',
     'enum': '𝑒',
     'module': '📦',
-    'namespace': '□'
+    'namespace': '□',
+    'section': ''  // No icon for section headers
   };
   return icons[type.toLowerCase()] || '•';
 }
