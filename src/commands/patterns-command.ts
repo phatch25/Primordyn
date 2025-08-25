@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { PatternMatcher, ExtractedPatterns } from '../utils/pattern-matcher.js';
 
 interface SimilarSymbol {
   name: string;
@@ -10,6 +11,7 @@ interface SimilarSymbol {
   line: number;
   similarity: number;
   sharedPatterns: string[];
+  categoryScores?: Record<string, number>;
 }
 
 export const patternsCommand =
@@ -19,6 +21,9 @@ export const patternsCommand =
     .option('--threshold <number>', 'Similarity threshold (0-1, default: 0.6)', parseFloat, 0.6)
     .option('--max-results <number>', 'Maximum results to show (default: 10)', parseInt, 10)
     .option('--show-patterns', 'Show the matching patterns')
+    .option('--pattern <pattern>', 'Search for specific pattern (e.g., "constructor", "async", "crud:*")')
+    .option('--category <category>', 'Focus on pattern category: structural, signature, behavioral, semantic')
+    .option('--verbose', 'Show detailed pattern analysis')
     .action(async (symbolName: string, options) => {
       const spinner = ora('Analyzing code patterns...').start();
       
@@ -49,35 +54,137 @@ export const patternsCommand =
           process.exit(1);
         }
         
-        // Extract patterns from target symbol
-        const targetPatterns = extractPatterns(targetSymbol, db);
+        // Extract content for pattern analysis
+        let targetContent = '';
+        if (targetSymbol.file_content && targetSymbol.line_start && targetSymbol.line_end) {
+          const lines = targetSymbol.file_content.split('\n');
+          targetContent = lines.slice(targetSymbol.line_start - 1, targetSymbol.line_end).join('\n');
+        }
         
-        if (targetPatterns.size === 0) {
+        // Extract patterns using enhanced matcher
+        const targetPatterns = PatternMatcher.extractPatterns(targetSymbol, targetContent);
+        
+        if (targetPatterns.patterns.size === 0) {
           spinner.fail(chalk.yellow('Could not extract patterns from target symbol'));
           db.close();
           return;
         }
         
-        // Find all symbols of the same type
-        const candidatesStmt = db.getDatabase().prepare(`
-          SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
-          FROM symbols s
-          JOIN files f ON s.file_id = f.id
-          WHERE s.type = ?
-            AND s.id != ?
-        `);
+        // Filter by specific pattern if requested
+        if (options.pattern) {
+          const patternLower = options.pattern.toLowerCase();
+          const filteredPatterns = new Set<string>();
+          const filteredWeighted = new Map<string, number>();
+          const filteredCategories = new Map<string, Set<string>>();
+          
+          targetPatterns.patterns.forEach(p => {
+            if (p.toLowerCase().includes(patternLower) || 
+                (patternLower.endsWith('*') && p.toLowerCase().startsWith(patternLower.slice(0, -1)))) {
+              filteredPatterns.add(p);
+              if (targetPatterns.weighted.has(p)) {
+                filteredWeighted.set(p, targetPatterns.weighted.get(p)!);
+              }
+              // Re-categorize
+              targetPatterns.categories.forEach((catPatterns, cat) => {
+                if (catPatterns.has(p)) {
+                  if (!filteredCategories.has(cat)) {
+                    filteredCategories.set(cat, new Set());
+                  }
+                  filteredCategories.get(cat)!.add(p);
+                }
+              });
+            }
+          });
+          
+          if (filteredPatterns.size === 0) {
+            spinner.fail(chalk.yellow(`No patterns matching "${options.pattern}" found in ${symbolName}`));
+            db.close();
+            return;
+          }
+          
+          targetPatterns.patterns = filteredPatterns;
+          targetPatterns.weighted = filteredWeighted;
+          targetPatterns.categories = filteredCategories;
+        }
         
-        const candidates = candidatesStmt.all(targetSymbol.type, targetSymbol.id) as any[];
+        // Find candidate symbols - if pattern specified, search more broadly
+        let candidatesStmt;
+        let candidates;
+        
+        if (options.pattern && options.pattern.includes('constructor')) {
+          // Special handling for constructor pattern - search methods named 'constructor'
+          candidatesStmt = db.getDatabase().prepare(`
+            SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
+            FROM symbols s
+            JOIN files f ON s.file_id = f.id
+            WHERE (s.name = 'constructor' OR s.type = 'method')
+              AND s.id != ?
+          `);
+          candidates = candidatesStmt.all(targetSymbol.id) as any[];
+        } else if (options.pattern) {
+          // Broader search when pattern specified
+          candidatesStmt = db.getDatabase().prepare(`
+            SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
+            FROM symbols s
+            JOIN files f ON s.file_id = f.id
+            WHERE s.id != ?
+          `);
+          candidates = candidatesStmt.all(targetSymbol.id) as any[];
+        } else {
+          // Default: same type only
+          candidatesStmt = db.getDatabase().prepare(`
+            SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
+            FROM symbols s
+            JOIN files f ON s.file_id = f.id
+            WHERE s.type = ?
+              AND s.id != ?
+          `);
+          candidates = candidatesStmt.all(targetSymbol.type, targetSymbol.id) as any[];
+        }
         
         // Calculate similarity for each candidate
         const similarities: SimilarSymbol[] = [];
         
         for (const candidate of candidates) {
-          const candidatePatterns = extractPatterns(candidate, db);
-          const similarity = calculateSimilarity(targetPatterns, candidatePatterns);
+          // Extract content for candidate
+          let candidateContent = '';
+          if (candidate.file_content && candidate.line_start && candidate.line_end) {
+            const lines = candidate.file_content.split('\n');
+            candidateContent = lines.slice(candidate.line_start - 1, candidate.line_end).join('\n');
+          }
+          
+          const candidatePatterns = PatternMatcher.extractPatterns(candidate, candidateContent);
+          
+          // Filter candidate patterns by category if specified
+          if (options.category) {
+            const catPatterns = candidatePatterns.categories.get(options.category);
+            if (!catPatterns || catPatterns.size === 0) continue;
+          }
+          
+          const similarity = PatternMatcher.calculateSimilarity(targetPatterns, candidatePatterns);
           
           if (similarity >= options.threshold) {
-            const sharedPatterns = findSharedPatterns(targetPatterns, candidatePatterns);
+            const sharedPatterns = findSharedPatterns(targetPatterns.patterns, candidatePatterns.patterns);
+            
+            // Calculate category scores if verbose
+            const categoryScores: Record<string, number> = {};
+            if (options.verbose) {
+              ['structural', 'signature', 'behavioral', 'semantic'].forEach(cat => {
+                const catTarget = { 
+                  patterns: targetPatterns.categories.get(cat) || new Set(),
+                  weighted: targetPatterns.weighted,
+                  categories: new Map([[cat, targetPatterns.categories.get(cat) || new Set()]])
+                };
+                const catCandidate = {
+                  patterns: candidatePatterns.categories.get(cat) || new Set(),
+                  weighted: candidatePatterns.weighted,
+                  categories: new Map([[cat, candidatePatterns.categories.get(cat) || new Set()]])
+                };
+                if (catTarget.patterns.size > 0 || catCandidate.patterns.size > 0) {
+                  categoryScores[cat] = PatternMatcher.calculateSimilarity(catTarget as ExtractedPatterns, catCandidate as ExtractedPatterns);
+                }
+              });
+            }
             
             similarities.push({
               name: candidate.name,
@@ -85,7 +192,8 @@ export const patternsCommand =
               file: candidate.relative_path,
               line: candidate.line_start,
               similarity,
-              sharedPatterns
+              sharedPatterns,
+              categoryScores
             });
           }
         }
@@ -118,6 +226,16 @@ export const patternsCommand =
               console.log(chalk.gray(`       • ${pattern}`));
             }
           }
+          
+          if (options.verbose && similar.categoryScores) {
+            console.log(chalk.gray('     Category breakdown:'));
+            Object.entries(similar.categoryScores).forEach(([cat, score]) => {
+              if (score > 0) {
+                const percentage = Math.round(score * 100);
+                console.log(chalk.gray(`       ${cat}: ${percentage}%`));
+              }
+            });
+          }
         }
         
         // Pattern analysis
@@ -136,8 +254,26 @@ export const patternsCommand =
           console.log(chalk.cyan('\n📊 COMMON PATTERNS:'));
           for (const [pattern, count] of commonPatterns) {
             const percentage = Math.round((count / similarities.length) * 100);
-            console.log(`  • ${pattern} (${percentage}% of similar symbols)`);
+            const [category, value] = pattern.split(':');
+            const formattedPattern = value ? `${chalk.blue(category)}: ${chalk.white(value)}` : pattern;
+            console.log(`  • ${formattedPattern} (${percentage}% of similar symbols)`);
           }
+        }
+        
+        // Show pattern summary if verbose
+        if (options.verbose) {
+          console.log(chalk.cyan('\n🔍 PATTERN ANALYSIS:'));
+          console.log(`  Target symbol has ${targetPatterns.patterns.size} unique patterns`);
+          
+          const categoryCounts: Record<string, number> = {};
+          targetPatterns.categories.forEach((patterns, cat) => {
+            categoryCounts[cat] = patterns.size;
+          });
+          
+          console.log('  Pattern distribution:');
+          Object.entries(categoryCounts).forEach(([cat, count]) => {
+            console.log(`    • ${cat}: ${count} patterns`);
+          });
         }
         
         // Refactoring opportunities
@@ -162,115 +298,7 @@ export const patternsCommand =
       }
     });
 
-function extractPatterns(symbol: any, db: PrimordynDB): Set<string> {
-  const patterns = new Set<string>();
-  
-  // Type pattern
-  patterns.add(`type:${symbol.type}`);
-  
-  // Extract content from file if available
-  let content = symbol.signature || '';
-  if (symbol.file_content && symbol.line_start && symbol.line_end) {
-    const lines = symbol.file_content.split('\n');
-    content = lines.slice(symbol.line_start - 1, symbol.line_end).join('\n');
-  }
-  
-  // Parameter patterns (for functions)
-  if (symbol.type === 'function' || symbol.type === 'method') {
-    const paramMatch = content.match(/\(([^)]*)\)/);
-    if (paramMatch) {
-      const params = paramMatch[1].split(',').map((p: string) => p.trim()).filter((p: string) => p);
-      patterns.add(`param_count:${params.length}`);
-      
-      // Parameter type patterns
-      for (const param of params) {
-        if (param.includes(':')) {
-          const type = param.split(':')[1].trim().split('=')[0].trim();
-          patterns.add(`param_type:${type}`);
-        }
-      }
-    }
-  }
-  
-  // Return type pattern
-  const returnMatch = content.match(/\):\s*([^{]+)\{/);
-  if (returnMatch) {
-    patterns.add(`return:${returnMatch[1].trim()}`);
-  }
-  
-  // Get symbols this one calls
-  const callsStmt = db.getDatabase().prepare(`
-    SELECT s.name, s.type
-    FROM call_graph cg
-    JOIN symbols s ON cg.callee_symbol_id = s.id
-    WHERE cg.caller_symbol_id = ?
-  `);
-  
-  const calls = callsStmt.all(symbol.id) as any[];
-  for (const call of calls) {
-    patterns.add(`calls:${call.type}`);
-    
-    // Common method names
-    if (['get', 'set', 'update', 'delete', 'create', 'find', 'save'].some(p => call.name.toLowerCase().includes(p))) {
-      patterns.add(`crud_op:${call.name.toLowerCase().match(/(get|set|update|delete|create|find|save)/)?.[0]}`);
-    }
-  }
-  
-  // Control flow patterns
-  if (content) {
-    if (content.includes('if')) patterns.add('flow:conditional');
-    if (content.includes('for') || content.includes('while')) patterns.add('flow:loop');
-    if (content.includes('try')) patterns.add('flow:error_handling');
-    if (content.includes('async') || content.includes('await')) patterns.add('flow:async');
-    if (content.includes('return')) patterns.add('flow:returns');
-    
-    // Common patterns
-    if (content.includes('console.log') || content.includes('logger')) patterns.add('pattern:logging');
-    if (content.includes('validate') || content.includes('validation')) patterns.add('pattern:validation');
-    if (content.includes('cache')) patterns.add('pattern:caching');
-    if (content.includes('query') || content.includes('SELECT')) patterns.add('pattern:database');
-  }
-  
-  // Size pattern
-  const lines = (symbol.line_end - symbol.line_start + 1);
-  if (lines < 10) patterns.add('size:small');
-  else if (lines < 50) patterns.add('size:medium');
-  else patterns.add('size:large');
-  
-  return patterns;
-}
-
-function calculateSimilarity(patterns1: Set<string>, patterns2: Set<string>): number {
-  const intersection = new Set([...patterns1].filter(x => patterns2.has(x)));
-  const union = new Set([...patterns1, ...patterns2]);
-  
-  if (union.size === 0) return 0;
-  
-  // Jaccard similarity with weight for certain patterns
-  let weightedIntersection = 0;
-  let weightedUnion = 0;
-  
-  for (const pattern of union) {
-    const weight = getPatternWeight(pattern);
-    weightedUnion += weight;
-    
-    if (intersection.has(pattern)) {
-      weightedIntersection += weight;
-    }
-  }
-  
-  return weightedIntersection / weightedUnion;
-}
-
-function getPatternWeight(pattern: string): number {
-  // Give more weight to structural patterns
-  if (pattern.startsWith('param_count:')) return 2;
-  if (pattern.startsWith('return:')) return 2;
-  if (pattern.startsWith('calls:')) return 1.5;
-  if (pattern.startsWith('pattern:')) return 1.5;
-  return 1;
-}
-
+// Helper function to find shared patterns between two sets
 function findSharedPatterns(patterns1: Set<string>, patterns2: Set<string>): string[] {
   return [...patterns1].filter(x => patterns2.has(x));
 }
