@@ -40,7 +40,7 @@ export const patternsCommand =
         
         // Find the target symbol
         const targetStmt = db.getDatabase().prepare(`
-          SELECT s.*, f.relative_path, f.path as file_path 
+          SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
           FROM symbols s
           JOIN files f ON s.file_id = f.id
           WHERE s.name = ?
@@ -65,12 +65,11 @@ export const patternsCommand =
         
         // Find all symbols of the same type
         const candidatesStmt = db.getDatabase().prepare(`
-          SELECT s.*, f.relative_path, f.path as file_path, s.signature as content
+          SELECT s.*, f.relative_path, f.path as file_path, f.content as file_content
           FROM symbols s
           JOIN files f ON s.file_id = f.id
           WHERE s.type = ?
             AND s.id != ?
-            AND s.signature IS NOT NULL
         `);
         
         const candidates = candidatesStmt.all(targetSymbol.type, targetSymbol.id) as any[];
@@ -174,11 +173,18 @@ function extractPatterns(symbol: any, db: PrimordynDB): Set<string> {
   // Type pattern
   patterns.add(`type:${symbol.type}`);
   
+  // Extract content from file if available
+  let content = symbol.signature || '';
+  if (symbol.file_content && symbol.line_start && symbol.line_end) {
+    const lines = symbol.file_content.split('\n');
+    content = lines.slice(symbol.line_start - 1, symbol.line_end).join('\n');
+  }
+  
   // Parameter patterns (for functions)
   if (symbol.type === 'function' || symbol.type === 'method') {
-    const paramMatch = symbol.content?.match(/\(([^)]*)\)/);
+    const paramMatch = content.match(/\(([^)]*)\)/);
     if (paramMatch) {
-      const params = paramMatch[1].split(',').map((p: string) => p.trim());
+      const params = paramMatch[1].split(',').map((p: string) => p.trim()).filter((p: string) => p);
       patterns.add(`param_count:${params.length}`);
       
       // Parameter type patterns
@@ -192,7 +198,7 @@ function extractPatterns(symbol: any, db: PrimordynDB): Set<string> {
   }
   
   // Return type pattern
-  const returnMatch = symbol.content?.match(/\):\s*([^{]+)\{/);
+  const returnMatch = content.match(/\):\s*([^{]+)\{/);
   if (returnMatch) {
     patterns.add(`return:${returnMatch[1].trim()}`);
   }
@@ -216,18 +222,18 @@ function extractPatterns(symbol: any, db: PrimordynDB): Set<string> {
   }
   
   // Control flow patterns
-  if (symbol.content) {
-    if (symbol.content.includes('if')) patterns.add('flow:conditional');
-    if (symbol.content.includes('for') || symbol.content.includes('while')) patterns.add('flow:loop');
-    if (symbol.content.includes('try')) patterns.add('flow:error_handling');
-    if (symbol.content.includes('async') || symbol.content.includes('await')) patterns.add('flow:async');
-    if (symbol.content.includes('return')) patterns.add('flow:returns');
+  if (content) {
+    if (content.includes('if')) patterns.add('flow:conditional');
+    if (content.includes('for') || content.includes('while')) patterns.add('flow:loop');
+    if (content.includes('try')) patterns.add('flow:error_handling');
+    if (content.includes('async') || content.includes('await')) patterns.add('flow:async');
+    if (content.includes('return')) patterns.add('flow:returns');
     
     // Common patterns
-    if (symbol.content.includes('console.log') || symbol.content.includes('logger')) patterns.add('pattern:logging');
-    if (symbol.content.includes('validate') || symbol.content.includes('validation')) patterns.add('pattern:validation');
-    if (symbol.content.includes('cache')) patterns.add('pattern:caching');
-    if (symbol.content.includes('query') || symbol.content.includes('SELECT')) patterns.add('pattern:database');
+    if (content.includes('console.log') || content.includes('logger')) patterns.add('pattern:logging');
+    if (content.includes('validate') || content.includes('validation')) patterns.add('pattern:validation');
+    if (content.includes('cache')) patterns.add('pattern:caching');
+    if (content.includes('query') || content.includes('SELECT')) patterns.add('pattern:database');
   }
   
   // Size pattern

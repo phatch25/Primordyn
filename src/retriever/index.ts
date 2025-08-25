@@ -1968,6 +1968,6 @@ export class ContextRetriever {
     
     // Search and return top matches
     const results = fuse.search(searchTerm);
-    return results.slice(0, 10).map(r => r.item);
+    return results.slice(0, 10).map((r: any) => r.item);
   }
 }

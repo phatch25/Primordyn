@@ -67,6 +67,9 @@ export const circularCommand =
           const sourceKey = `${edge.source_file}:${edge.source_name}`;
           const targetKey = `${edge.target_file}:${edge.target_name}`;
           
+          // Skip self-references (recursion)
+          if (sourceKey === targetKey) continue;
+          
           if (!adjacencyList.has(sourceKey)) {
             adjacencyList.set(sourceKey, new Set());
           }

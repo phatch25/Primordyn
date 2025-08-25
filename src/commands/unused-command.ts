@@ -48,6 +48,8 @@ export const unusedCommand =
             FROM call_graph 
             WHERE callee_symbol_id IS NOT NULL
           )
+          AND s.name NOT IN ('default', 'exports', 'module.exports')
+          AND s.type NOT IN ('export', 'import', 'require')
         `;
         
         const params: any[] = [];

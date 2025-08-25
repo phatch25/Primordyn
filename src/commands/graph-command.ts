@@ -57,64 +57,93 @@ export const graphCommand =
         // Build the dependency tree
         const visited = new Set<string>();
         
-        function buildTree(name: string, filePath: string, depth: number): GraphNode | null {
+        function buildTree(name: string, symbolId: number | null, depth: number, type?: string, file?: string): GraphNode | null {
           if (depth > options.depth) return null;
           
-          const key = `${filePath}:${name}`;
+          const key = symbolId ? `id:${symbolId}` : `name:${name}`;
           if (visited.has(key)) {
-            return { name: `${name} (circular)`, type: '', file: '', children: [], depth };
+            return { name: `${name} (circular)`, type: type || '', file: file || '', children: [], depth };
           }
           visited.add(key);
           
-          const query = options.reverse ? `
-            SELECT DISTINCT
-              s.name,
-              s.type,
-              f.relative_path as file,
-              f.path as file_path
-            FROM call_graph cg
-            JOIN symbols s ON cg.caller_symbol_id = s.id
-            JOIN files f ON s.file_id = f.id
-            WHERE cg.callee_symbol_id = (
-              SELECT s.id FROM symbols s 
+          let deps: any[];
+          if (symbolId) {
+            const query = options.reverse ? `
+              SELECT DISTINCT
+                s.name,
+                s.type,
+                s.id,
+                f.relative_path as file,
+                f.path as file_path
+              FROM call_graph cg
+              JOIN symbols s ON cg.caller_symbol_id = s.id
               JOIN files f ON s.file_id = f.id
-              WHERE s.name = ? AND f.path = ? LIMIT 1
-            )
-          ` : `
-            SELECT DISTINCT
-              s.name,
-              s.type,
-              f.relative_path as file,
-              f.path as file_path
-            FROM call_graph cg
-            JOIN symbols s ON cg.callee_symbol_id = s.id
-            JOIN files f ON s.file_id = f.id
-            WHERE cg.caller_symbol_id = (
-              SELECT s.id FROM symbols s 
+              WHERE cg.callee_symbol_id = ?
+            ` : `
+              SELECT DISTINCT
+                s.name,
+                s.type,
+                s.id,
+                f.relative_path as file,
+                f.path as file_path
+              FROM call_graph cg
+              JOIN symbols s ON cg.callee_symbol_id = s.id
               JOIN files f ON s.file_id = f.id
-              WHERE s.name = ? AND f.path = ? LIMIT 1
-            )
-          `;
-          
-          const stmt = db.getDatabase().prepare(query);
-          const deps = stmt.all(name, filePath) as any[];
+              WHERE cg.caller_symbol_id = ?
+            `;
+            
+            const stmt = db.getDatabase().prepare(query);
+            deps = stmt.all(symbolId) as any[];
+          } else {
+            // Fallback to name-based search
+            const query = options.reverse ? `
+              SELECT DISTINCT
+                s.name,
+                s.type,
+                s.id,
+                f.relative_path as file,
+                f.path as file_path
+              FROM call_graph cg
+              JOIN symbols s ON cg.caller_symbol_id = s.id
+              JOIN files f ON s.file_id = f.id
+              WHERE cg.callee_symbol_id IN (
+                SELECT id FROM symbols WHERE name = ?
+              )
+            ` : `
+              SELECT DISTINCT
+                s.name,
+                s.type,
+                s.id,
+                f.relative_path as file,
+                f.path as file_path
+              FROM call_graph cg
+              JOIN symbols s ON cg.callee_symbol_id = s.id
+              JOIN files f ON s.file_id = f.id
+              WHERE cg.caller_symbol_id IN (
+                SELECT id FROM symbols WHERE name = ?
+              )
+            `;
+            
+            const stmt = db.getDatabase().prepare(query);
+            deps = stmt.all(name) as any[];
+          }
           
           const children: GraphNode[] = [];
           for (const dep of deps) {
-            const child = buildTree(dep.name, dep.file_path || dep.file, depth + 1);
+            const child = buildTree(dep.name, dep.id, depth + 1, dep.type, dep.file);
             if (child) children.push(child);
           }
           
           return {
             name,
-            type: targetSymbol?.type || 'unknown',
-            file: filePath,
+            type: type || 'unknown',
+            file: file || '',
             children,
             depth
           };
         }
         
-        const tree = buildTree(symbolName, targetSymbol.file_path, 0);
+        const tree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path);
         
         spinner.stop();
         
