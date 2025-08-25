@@ -194,7 +194,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     const params = (node.params || []).map((p: BabelNode) => {
       if (p.type === 'Identifier') {
         // Include type annotation if available
-        const typeAnnotation = (p as any).typeAnnotation;
+        const typeAnnotation = (p as BabelIdentifier & { typeAnnotation?: BabelTypeAnnotation }).typeAnnotation;
         if (typeAnnotation?.typeAnnotation) {
           const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
           return `${p.name}: ${typeStr}`;
