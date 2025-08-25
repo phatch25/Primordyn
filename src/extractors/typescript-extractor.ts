@@ -16,6 +16,7 @@ import type {
   BabelTSEnumMember,
   BabelTSExpressionWithTypeArguments,
   BabelExportSpecifier,
+  BabelTypeAnnotation,
   StructureCategory
 } from './types.js';
 
