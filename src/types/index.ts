@@ -28,7 +28,7 @@ export interface Symbol {
 
 export interface CallReference {
   calleeName: string;
-  callType: 'function' | 'method' | 'constructor' | 'import';
+  callType: 'function' | 'method' | 'constructor' | 'import' | 'extends' | 'implements' | 'instantiation';
   line: number;
   column?: number;
   isExternal?: boolean;
@@ -42,6 +42,12 @@ export interface ExtractedContext {
   comments: string[];
   calls: CallReference[];
   structure: CodeStructure;
+  relationships?: Array<{
+    type: 'extends' | 'implements' | 'imports' | 'exports';
+    source: string;
+    target: string;
+    line?: number;
+  }>;
 }
 
 export interface IndexOptions extends Partial<ScanOptions> {

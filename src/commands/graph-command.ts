@@ -147,6 +147,11 @@ export const graphCommand =
         
         spinner.stop();
         
+        // Debug: Log tree structure
+        if (process.env.DEBUG) {
+          console.log('Tree structure:', JSON.stringify(tree, null, 2));
+        }
+        
         if (!tree) {
           console.log(chalk.yellow('No dependencies found'));
           db.close();

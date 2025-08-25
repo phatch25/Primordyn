@@ -2,10 +2,13 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import type { DatabaseInfo } from '../types/index.js';
+import { SymbolRepository, FileRepository } from './repositories/index.js';
 
 export class PrimordynDB {
   private db: Database.Database;
   private dbPath: string;
+  public readonly symbols: SymbolRepository;
+  public readonly files: FileRepository;
 
   constructor(projectPath: string = process.cwd()) {
     const dbDir = join(projectPath, '.primordyn');
@@ -17,6 +20,10 @@ export class PrimordynDB {
     this.dbPath = join(dbDir, 'context.db');
     this.db = new Database(this.dbPath);
     this.initializeSchema();
+    
+    // Initialize repositories
+    this.symbols = new SymbolRepository(this.db);
+    this.files = new FileRepository(this.db);
   }
 
   private initializeSchema(): void {
@@ -74,7 +81,7 @@ export class PrimordynDB {
         callee_name TEXT NOT NULL,
         callee_symbol_id INTEGER,
         callee_file_id INTEGER,
-        call_type TEXT NOT NULL, -- 'function', 'method', 'constructor', 'import'
+        call_type TEXT NOT NULL, -- 'function', 'method', 'constructor', 'import', 'extends', 'implements', 'instantiation'
         line_number INTEGER NOT NULL,
         column_number INTEGER,
         FOREIGN KEY (caller_symbol_id) REFERENCES symbols (id) ON DELETE CASCADE,

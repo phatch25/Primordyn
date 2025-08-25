@@ -91,11 +91,11 @@ export class TypeScriptExtractor extends BaseExtractor {
           }
         },
         ClassDeclaration: (path: NodePath) => {
-          this.extractClass(path.node as unknown as BabelNode, context.symbols);
+          this.extractClass(path.node as unknown as BabelNode, context.symbols, undefined, context.calls);
         },
         ClassExpression: (path: NodePath) => {
           if (path.parent.type === 'VariableDeclarator' && path.parent.id.type === 'Identifier') {
-            this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name);
+            this.extractClass(path.node as unknown as BabelNode, context.symbols, path.parent.id.name, context.calls);
           }
         },
         TSInterfaceDeclaration: (path: NodePath) => {
@@ -277,7 +277,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     });
   }
   
-  private extractClass(node: BabelNode, symbols: Symbol[], name?: string): void {
+  private extractClass(node: BabelNode, symbols: Symbol[], name?: string, calls?: CallReference[]): void {
     const className = name || node.id?.name;
     if (!className) return;
     
@@ -289,8 +289,21 @@ export class TypeScriptExtractor extends BaseExtractor {
     
     let signature = `class ${className}`;
     if (node.superClass) {
-      const superName = node.superClass.type === 'Identifier' ? node.superClass.name : 'unknown';
+      const superName = node.superClass.type === 'Identifier' && node.superClass.name 
+        ? node.superClass.name 
+        : 'unknown';
       signature += ` extends ${superName}`;
+      
+      // Track extends relationship
+      if (calls && superName !== 'unknown') {
+        calls.push({
+          calleeName: superName,
+          callType: 'extends',
+          line: lineStart,
+          column: node.loc?.start.column || 0,
+          isExternal: false
+        });
+      }
     }
     
     const methods: string[] = [];
@@ -447,7 +460,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     if (node.callee.type === 'Identifier' && node.callee.name) {
       calls.push({
         calleeName: node.callee.name,
-        callType: 'constructor',
+        callType: 'instantiation',
         line: node.loc?.start.line || 1,
         column: node.loc?.start.column || 0,
         isExternal: false
