@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
 import type { TargetSymbolResult, TextSearchResult, BreakingChangeResult } from '../types/database.js';
+import { withDefaults } from '../config/defaults.js';
 
 interface ImpactNode {
   symbol_name: string;
@@ -28,6 +29,13 @@ export const impactCommand =
       const spinner = ora('Analyzing change impact...').start();
       
       try {
+        // Apply smart defaults
+        const impactDefaults = withDefaults('impact', {
+          depth: options.depth || 3,
+          format: options.format || 'text',
+          includeTests: options.includeTests !== false  // Default true for impact
+        });
+        
         const db = new PrimordynDB();
         // const projectRoot = process.cwd();
         // const dbPath = join(projectRoot, '.primordyn', 'context.db');
@@ -101,8 +109,8 @@ export const impactCommand =
           impactMap.get(1)!.push(ref);
         });
         
-        // BFS for deeper impacts
-        while (queue.length > 0 && queue[0].depth < options.depth) {
+        // BFS for deeper impacts  
+        while (queue.length > 0 && queue[0].depth < impactDefaults.depth) {
           const current = queue.shift()!;
           
           const nextRefsStmt = db.getDatabase().prepare(`

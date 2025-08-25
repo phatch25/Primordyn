@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
 import type { UnusedSymbolQueryResult } from '../types/database.js';
+import { withDefaults } from '../config/defaults.js';
 
 function getSymbolIcon(type: string): string {
   const icons: Record<string, string> = {
@@ -21,7 +22,7 @@ function getSymbolIcon(type: string): string {
 
 export const unusedCommand =
   new Command('unused')
-    .description('Find unused symbols (dead code) in the codebase')
+    .description('[EXPERIMENTAL] Find potentially unused symbols (high false positive rate)')
     .option('-t, --type <type>', 'Filter by symbol type (function, class, interface, etc.)')
     .option('-f, --file <pattern>', 'Filter by file pattern')
     .option('--show-exports', 'Include exported symbols (they might be used externally)')
@@ -48,19 +49,22 @@ export const unusedCommand =
           process.exit(1);
         }
         
-        // Use the repository method with improved options
-        const unusedSymbols = db.symbols.findUnused({
+        // Apply smart defaults - only override if user explicitly set options
+        const searchOptions = withDefaults('unused', {
           type: options.type,
           file: options.file,
-          ignoreTests: !options.includeTests,
-          ignoreDocs: !options.includeDocs,
-          ignoreExamples: !options.includeExamples,
-          ignoreConfig: !options.includeConfig,
-          ignoreExported: !options.showExports,
-          minLines: options.minLines,
+          // Only change defaults if user explicitly set the flag
+          ignoreTests: options.includeTests ? false : true,
+          ignoreDocs: options.includeDocs ? false : true,
+          ignoreExamples: options.includeExamples ? false : true,
+          ignoreConfig: options.includeConfig ? false : true,
+          ignoreExported: options.showExports ? false : true,
+          minLines: options.minLines || 10,  // Default to 10 lines for significance
           customIgnore: options.ignore,
-          strict: options.strict
-        }) as unknown as UnusedSymbolQueryResult[];
+          strict: options.strict || false  // Default to less false positives
+        });
+        
+        const unusedSymbols = db.symbols.findUnused(searchOptions) as unknown as UnusedSymbolQueryResult[];
         
         spinner.stop();
         
@@ -131,7 +135,11 @@ export const unusedCommand =
         }
         
         // Default text format
+        // Show summary with smart defaults note
         console.log(chalk.yellow(`\n🔍 Found ${unusedSymbols.length} potentially unused symbols:\n`));
+        if (!options.strict && !options.includeTests) {
+          console.log(chalk.gray('(Using smart defaults: excluding tests, docs, configs, and small code blocks)\n'));
+        }
         
         for (const [file, symbols] of byFile) {
           console.log(chalk.cyan(`\n${file}:`));

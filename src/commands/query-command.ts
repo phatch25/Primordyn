@@ -4,6 +4,7 @@ import { ContextRetriever } from '../retriever/index.js';
 import { QueryCommandOptions, QueryCommandResult, FileResult, DependencyGraph, ImpactAnalysis, GitHistory, RecentFileChanges, SymbolResult } from '../types/index.js';
 import { validateTokenLimit, validateFormat, validateLanguages, validateDays, validateDepth, validateSearchTerm, ValidationError } from '../utils/validation.js';
 import chalk from 'chalk';
+import { withDefaults } from '../config/defaults.js';
 
 export const queryCommand = new Command('query')
   .description('Get detailed context for a specific symbol or file')
@@ -77,11 +78,22 @@ ${chalk.bold('Notes:')}
   • Impact analysis helps identify refactoring risks`)
   .action(async (searchTerm: string, options: QueryCommandOptions) => {
     try {
-      // Validate inputs
+      // Apply smart defaults for better out-of-box experience
+      const queryDefaults = withDefaults('query', {
+        tokens: options.tokens || '16000',
+        format: options.format || 'ai',
+        depth: options.depth || '1',
+        includeTests: options.includeTests || false,
+        includeCallers: options.includeCallers || false,
+        showGraph: options.showGraph || false,
+        impact: options.impact || false
+      });
+      
+      // Validate inputs with defaults applied
       const validatedSearchTerm = validateSearchTerm(searchTerm);
-      const maxTokens = validateTokenLimit(options.tokens);
-      const format = validateFormat(options.format);
-      const depth = validateDepth(options.depth);
+      const maxTokens = validateTokenLimit(queryDefaults.tokens);
+      const format = validateFormat(queryDefaults.format);
+      const depth = validateDepth(queryDefaults.depth);
       const fileTypes = options.languages ? validateLanguages(options.languages) : undefined;
       const days = options.recent ? validateDays(options.recent) : undefined;
       const symbolType = options.type;

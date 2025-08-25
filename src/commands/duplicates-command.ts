@@ -5,6 +5,7 @@ import ora from 'ora';
 import { createHash } from 'crypto';
 import { getHelpText } from '../utils/help-texts.js';
 import type { DuplicateSymbolQueryResult } from '../types/database.js';
+import { withDefaults } from '../config/defaults.js';
 
 interface DuplicateGroup {
   hash: string;
@@ -52,16 +53,24 @@ export const duplicatesCommand =
             AND (s.line_end - s.line_start + 1) >= ?
         `;
         
-        const params: (string | number)[] = [options.minLines];
+        // Apply smart defaults
+        const dupDefaults = withDefaults('duplicates', {
+          minLines: options.minLines || 10,  // Focus on significant duplication
+          ignoreTests: options.ignoreTests !== false,  // Default true
+          type: options.type,
+          showContent: options.showContent || false
+        });
+        
+        const params: (string | number)[] = [dupDefaults.minLines];
         
         // Note: token_count field doesn't exist in new schema
         
-        if (options.type) {
+        if (dupDefaults.type) {
           query += ' AND s.type = ?';
-          params.push(options.type);
+          params.push(dupDefaults.type);
         }
         
-        if (options.ignoreTests) {
+        if (dupDefaults.ignoreTests) {
           query += ` AND f.relative_path NOT LIKE '%test%'
                      AND f.relative_path NOT LIKE '%spec%'
                      AND f.relative_path NOT LIKE '%__tests__%'`;
@@ -118,7 +127,9 @@ export const duplicatesCommand =
         let totalDuplicateLines = 0;
         let groupIndex = 0;
         
-        for (const group of duplicateGroups.slice(0, 20)) { // Show top 20
+        // Limit output for better UX (can be overridden with --all flag later)
+        const displayLimit = 20;
+        for (const group of duplicateGroups.slice(0, displayLimit)) {
           groupIndex++;
           const duplicateCount = group.symbols.length;
           const lineCount = group.symbols[0].line_count;
@@ -131,7 +142,7 @@ export const duplicatesCommand =
             console.log(`   ${chalk.red('●')} ${symbol.relative_path}:${symbol.line_start}-${symbol.line_end} - ${chalk.white(symbol.name)}`);
           }
           
-          if (options.showContent && group.symbols[0].content) {
+          if (dupDefaults.showContent && group.symbols[0].content) {
             console.log(chalk.gray('\n   Content preview:'));
             const preview = group.symbols[0].content.split('\n').slice(0, 5).join('\n');
             console.log(chalk.gray(preview.split('\n').map(line => '   │ ' + line).join('\n')));

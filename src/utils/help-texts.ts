@@ -58,17 +58,28 @@ ${chalk.bold('Notes:')}
   • Circular dependencies are highlighted in red`,
 
   unused: `
-${chalk.bold('Details:')}
-  The unused command identifies potentially dead code by finding symbols
-  that are never referenced elsewhere in the codebase.
-
-${chalk.bold('Features:')}
-  • Smart filtering - Excludes common false positives automatically
-  • Documentation exclusion - Ignores docs, examples, and config files
-  • Customizable patterns - Add your own exclusion patterns
-  • Export detection - Identifies exported but unused symbols
-  • Size analysis - Highlights large unused code blocks
-  • Multiple formats - Text, JSON, or Markdown reports
+${chalk.red('⚠️  WARNING: EXPERIMENTAL - VERY HIGH FALSE POSITIVE RATE')}
+  
+${chalk.bold('Critical Limitations:')}
+  This command has fundamental limitations and returns ~90% false positives.
+  It cannot reliably detect unused code due to:
+  
+  • ${chalk.yellow('Type usage not tracked')} - Interfaces/types used for type checking appear unused
+  • ${chalk.yellow('Inheritance not understood')} - Base classes and extended interfaces appear unused  
+  • ${chalk.yellow('Constructor calls missed')} - Classes instantiated with 'new' appear unused
+  • ${chalk.yellow('Exports assumed unused')} - Public API methods appear unused
+  • ${chalk.yellow('Dynamic imports invisible')} - Dynamically imported code appears unused
+  • ${chalk.yellow('Poor call tracking')} - Only ~5% of function calls are properly resolved
+  
+${chalk.bold('Should NOT be used for:')}
+  • Automated code deletion
+  • CI/CD pipelines  
+  • Code quality metrics
+  
+${chalk.bold('May be useful for:')}
+  • Finding obviously dead code (with manual verification)
+  • Identifying candidates for closer inspection
+  • Understanding code that might be unused
 
 ${chalk.bold('Examples:')}
   ${chalk.gray('# Find all unused symbols')}
