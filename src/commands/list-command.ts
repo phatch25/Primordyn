@@ -164,7 +164,7 @@ Examples:
     }
   });
 
-function outputSimpleFormat(result: ListResult, searchPattern: string | undefined, options: ListCommandOptions) {
+function outputSimpleFormat(result: ListResult, _searchPattern: string | undefined, _options: ListCommandOptions) {
   // Simple format for easy parsing/piping
   if (result.symbols.length > 0) {
     result.symbols.forEach(sym => {

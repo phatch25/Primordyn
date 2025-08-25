@@ -47,7 +47,7 @@ Note: Use 'list' command first to discover available symbols
       const db = DatabaseConnectionPool.getConnection();
       
       // Query command focuses on exact matches - no alias expansion
-      const expandedSearchTerm = validatedSearchTerm;
+      // const expandedSearchTerm = validatedSearchTerm;
       
       // Check if index exists, build only if empty
       const dbInfo = await db.getDatabaseInfo();
@@ -166,12 +166,13 @@ Note: Use 'list' command first to discover available symbols
       
       // Handle different output formats
       switch (format) {
-        case 'json':
+        case 'json': {
           const jsonOutput = suggestions.length > 0 
             ? { ...result, suggestions }
             : result;
           console.log(JSON.stringify(jsonOutput, null, 2));
           break;
+        }
           
         case 'ai':
           outputAIFormat(validatedSearchTerm, result, options, suggestions);

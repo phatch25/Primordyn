@@ -3,11 +3,8 @@ import { PrimordynDB } from '../database/index.js';
 import { OutputFormatter } from '../utils/output-formatter.js';
 import chalk from 'chalk';
 import ora, { Ora } from 'ora';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// Base command class for all CLI commands
 
 export abstract class BaseCommand {
   protected db!: PrimordynDB;
@@ -75,7 +72,7 @@ export abstract class BaseCommand {
     }
   }
 
-  protected handleError(error: any): void {
+  protected handleError(error: unknown): void {
     this.stopSpinner(false);
     
     if (error instanceof Error) {
@@ -91,7 +88,7 @@ export abstract class BaseCommand {
     process.exit(1);
   }
 
-  protected validateOptions(options: any, validators: Record<string, (value: any) => boolean>): void {
+  protected validateOptions(options: Record<string, unknown>, validators: Record<string, (value: unknown) => boolean>): void {
     for (const [key, validator] of Object.entries(validators)) {
       if (options[key] !== undefined && !validator(options[key])) {
         throw new Error(`Invalid value for option --${key}: ${options[key]}`);
@@ -99,7 +96,7 @@ export abstract class BaseCommand {
     }
   }
 
-  protected formatJson(data: any): string {
+  protected formatJson(data: unknown): string {
     return JSON.stringify(data, null, 2);
   }
 
@@ -112,5 +109,5 @@ export abstract class BaseCommand {
   }
 
   abstract register(program: Command): void;
-  abstract execute(options: any, ...args: any[]): Promise<void>;
+  abstract execute(options: unknown, ...args: unknown[]): Promise<void>;
 }

@@ -1,32 +1,39 @@
 import Database from 'better-sqlite3';
+import { BaseRepository } from './base-repository.js';
 import type { 
-  Symbol, SymbolRow, CallGraphRow, CallerQueryRow,
-  SymbolLocationRow, SymbolQueryRow, SymbolLookupResult,
-  SymbolWithFileContent, CallGraphResult, CallerResult
+  SymbolRow, SymbolWithFileContent, CallGraphResult, CallerResult
 } from '../../types/index.js';
 
-export class SymbolRepository {
-  constructor(private db: Database.Database) {}
+export class SymbolRepository extends BaseRepository<SymbolRow> {
+  constructor(db: Database.Database) {
+    super(db, 500, 10 * 60 * 1000); // 500 items, 10 minute TTL
+  }
 
   findByName(name: string): SymbolRow | undefined {
-    const stmt = this.db.prepare(`
-      SELECT s.*, f.relative_path, f.path as file_path
-      FROM symbols s
-      JOIN files f ON s.file_id = f.id
-      WHERE s.name = ?
-      LIMIT 1
-    `);
-    return stmt.get(name) as SymbolRow | undefined;
+    const cacheKey = this.buildCacheKey('name', name);
+    return this.getCached(cacheKey, () => {
+      const stmt = this.db.prepare(`
+        SELECT s.*, f.relative_path, f.path as file_path
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE s.name = ?
+        LIMIT 1
+      `);
+      return stmt.get(name) as SymbolRow | undefined;
+    });
   }
 
   findById(id: number): SymbolRow | undefined {
-    const stmt = this.db.prepare(`
-      SELECT s.*, f.relative_path, f.path as file_path
-      FROM symbols s
-      JOIN files f ON s.file_id = f.id
-      WHERE s.id = ?
-    `);
-    return stmt.get(id) as SymbolRow | undefined;
+    const cacheKey = this.buildCacheKey('id', id);
+    return this.getCached(cacheKey, () => {
+      const stmt = this.db.prepare(`
+        SELECT s.*, f.relative_path, f.path as file_path
+        FROM symbols s
+        JOIN files f ON s.file_id = f.id
+        WHERE s.id = ?
+      `);
+      return stmt.get(id) as SymbolRow | undefined;
+    });
   }
 
   findByType(type: string, limit?: number): SymbolRow[] {

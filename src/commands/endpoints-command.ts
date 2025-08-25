@@ -105,7 +105,9 @@ export const endpointsCommand = new Command('endpoints')
             } else if (metadata.functionName) {
               handler = metadata.functionName;
             }
-          } catch {}
+          } catch {
+            // Ignore metadata parsing errors
+          }
         }
         
         // Skip if it doesn't look like a real endpoint

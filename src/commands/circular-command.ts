@@ -2,11 +2,6 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 interface CircularChain {
   symbols: Array<{
@@ -28,8 +23,8 @@ export const circularCommand =
       
       try {
         const db = new PrimordynDB();
-        const projectRoot = process.cwd();
-        const dbPath = join(projectRoot, '.primordyn', 'context.db');
+        // const projectRoot = process.cwd();
+        // const dbPath = join(projectRoot, '.primordyn', 'context.db');
         
         const dbInfo = await db.getDatabaseInfo();
         if (dbInfo.fileCount === 0) {
@@ -60,10 +55,21 @@ export const circularCommand =
           WHERE s2.id IS NOT NULL
         `);
         
-        const edges = edgesStmt.all() as any[];
+        const edges = edgesStmt.all() as Array<{
+          source_id: number;
+          source_name: string;
+          source_type: string;
+          source_file: string;
+          source_relative: string;
+          target_id: number;
+          target_name: string;
+          target_type: string;
+          target_file: string;
+          target_relative: string;
+        }>;
         
         // Build graph
-        for (const edge of edges as any[]) {
+        for (const edge of edges) {
           const sourceKey = `${edge.source_file}:${edge.source_name}`;
           const targetKey = `${edge.target_file}:${edge.target_name}`;
           
@@ -111,7 +117,7 @@ export const circularCommand =
               // Create cycle info
               const chain: CircularChain = {
                 symbols: cycle.map(key => {
-                  const [file, name] = key.split(':');
+                  const [, name] = key.split(':');
                   const info = symbolInfo.get(key) || { type: 'unknown', file: 'unknown' };
                   return { name, file: info.file, type: info.type };
                 }),

@@ -2,11 +2,6 @@ import { Command } from 'commander';
 import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 interface GraphNode {
   name: string;
@@ -29,8 +24,8 @@ export const graphCommand =
       
       try {
         const db = new PrimordynDB();
-        const projectRoot = process.cwd();
-        const dbPath = join(projectRoot, '.primordyn', 'context.db');
+        // const projectRoot = process.cwd();
+        // const dbPath = join(projectRoot, '.primordyn', 'context.db');
         
         const dbInfo = await db.getDatabaseInfo();
         if (dbInfo.fileCount === 0) {
@@ -211,7 +206,7 @@ function renderAsciiTree(node: GraphNode, options: any, prefix = '', isLast = tr
   return result;
 }
 
-function renderDot(node: GraphNode, options: any): string {
+function renderDot(node: GraphNode, _options: any): string {
   const lines: string[] = ['digraph dependencies {'];
   lines.push('  rankdir=LR;');
   lines.push('  node [shape=box];');
@@ -241,7 +236,7 @@ function renderDot(node: GraphNode, options: any): string {
   return lines.join('\n');
 }
 
-function renderMermaid(node: GraphNode, options: any): string {
+function renderMermaid(node: GraphNode, _options: any): string {
   const lines: string[] = ['graph LR'];
   const nodeIds = new Map<string, string>();
   let idCounter = 0;

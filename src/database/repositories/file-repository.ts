@@ -1,28 +1,40 @@
 import Database from 'better-sqlite3';
-import type { FileRow, FileQueryRow, FileResult } from '../../types/index.js';
+import { BaseRepository } from './base-repository.js';
+import type { FileRow } from '../../types/index.js';
 
-export class FileRepository {
-  constructor(private db: Database.Database) {}
+export class FileRepository extends BaseRepository<FileRow> {
+  constructor(db: Database.Database) {
+    super(db, 200, 10 * 60 * 1000); // 200 items, 10 minute TTL
+  }
 
   findById(id: number): FileRow | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM files WHERE id = ?
-    `);
-    return stmt.get(id) as FileRow | undefined;
+    const cacheKey = this.buildCacheKey('file:id', id);
+    return this.getCached(cacheKey, () => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM files WHERE id = ?
+      `);
+      return stmt.get(id) as FileRow | undefined;
+    });
   }
 
   findByPath(path: string): FileRow | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM files WHERE path = ? OR relative_path = ?
-    `);
-    return stmt.get(path, path) as FileRow | undefined;
+    const cacheKey = this.buildCacheKey('file:path', path);
+    return this.getCached(cacheKey, () => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM files WHERE path = ? OR relative_path = ?
+      `);
+      return stmt.get(path, path) as FileRow | undefined;
+    });
   }
 
   findByHash(hash: string): FileRow | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM files WHERE hash = ?
-    `);
-    return stmt.get(hash) as FileRow | undefined;
+    const cacheKey = this.buildCacheKey('file:hash', hash);
+    return this.getCached(cacheKey, () => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM files WHERE hash = ?
+      `);
+      return stmt.get(hash) as FileRow | undefined;
+    });
   }
 
   searchByPattern(pattern: string): FileRow[] {
@@ -79,6 +91,9 @@ export class FileRepository {
       file.hash
     );
     
+    // Invalidate cache after insert
+    this.invalidateCache();
+    
     return result.lastInsertRowid as number;
   }
 
@@ -115,6 +130,12 @@ export class FileRepository {
     `);
     
     const result = stmt.run(...values);
+    
+    // Invalidate cache after update
+    if (result.changes > 0) {
+      this.invalidateCache();
+    }
+    
     return result.changes > 0;
   }
 

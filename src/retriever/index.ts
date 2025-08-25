@@ -1459,7 +1459,7 @@ export class ContextRetriever {
     const database = this.db.getDatabase();
     const limit = options.limit || 100;
     
-    let whereConditions: string[] = [];
+    const whereConditions: string[] = [];
     const params: any[] = [];
     
     if (options.fileTypes?.length) {
@@ -1507,7 +1507,7 @@ export class ContextRetriever {
     const database = this.db.getDatabase();
     const limit = options.limit || 100;
     
-    let whereConditions: string[] = [];
+    const whereConditions: string[] = [];
     const params: any[] = [];
     
     if (options.fileTypes?.length) {
@@ -1723,7 +1723,7 @@ export class ContextRetriever {
     
     sqlParams.push(lowerTerm, `${lowerTerm}%`, `%${lowerTerm}%`);
     
-    let candidates = database.prepare(sqlQuery).all(...sqlParams) as SymbolQueryRow[];
+    const candidates = database.prepare(sqlQuery).all(...sqlParams) as SymbolQueryRow[];
     
     // If we still have few results, try fuzzy matching on a larger set
     if (candidates.length < 5) {
