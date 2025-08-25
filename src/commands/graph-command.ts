@@ -4,11 +4,23 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
 
+interface SymbolWithPath extends Record<string, unknown> {
+  id: number;
+  name: string;
+  type: string;
+  file_id: number;
+  line_start: number;
+  line_end: number;
+  signature: string | null;
+  relative_path: string;
+  file_path: string;
+}
+
 interface GraphNode {
   name: string;
   type: string;
   file: string;
-  signature?: string;
+  signature?: string | null;
   children: GraphNode[];
   depth: number;
   isCircular?: boolean;
@@ -51,7 +63,7 @@ export const graphCommand =
           WHERE s.name = ?
           LIMIT 1
         `);
-        const targetSymbol = targetStmt.get(symbolName) as any;
+        const targetSymbol = targetStmt.get(symbolName) as SymbolWithPath | undefined;
         
         if (!targetSymbol) {
           spinner.fail(chalk.red(`Symbol "${symbolName}" not found`));
@@ -186,10 +198,10 @@ export const graphCommand =
         if (options.bidirectional) {
           // Build both caller and callee trees
           visited.clear(); // Reset visited for callers
-          const callerTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, true);
+          const callerTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature ?? undefined, targetSymbol.line_start, true);
           
           visited.clear(); // Reset visited for callees
-          const calleeTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, false);
+          const calleeTree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature ?? undefined, targetSymbol.line_start, false);
           
           // Combine both trees into a unified structure
           tree = {
@@ -225,7 +237,7 @@ export const graphCommand =
           }
         } else {
           // Original single-direction tree
-          tree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature, targetSymbol.line_start, options.reverse);
+          tree = buildTree(targetSymbol.name, targetSymbol.id, 0, targetSymbol.type, targetSymbol.relative_path, targetSymbol.signature ?? undefined, targetSymbol.line_start, options.reverse);
         }
         
         spinner.stop();
