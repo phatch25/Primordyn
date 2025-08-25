@@ -3,6 +3,7 @@ import { DatabaseConnectionPool } from '../database/connection-pool.js';
 import { validateSearchTerm, ValidationError } from '../utils/validation.js';
 import chalk from 'chalk';
 import { getHelpText } from '../utils/help-texts.js';
+import type { EndpointQueryRow } from '../types/database.js';
 
 interface EndpointInfo {
   method: string;
@@ -60,7 +61,7 @@ export const endpointsCommand = new Command('endpoints')
       
       query += ' ORDER BY f.relative_path, s.line_start';
       
-      const results = db.getDatabase().prepare(query).all() as any[];
+      const results = db.getDatabase().prepare(query).all() as EndpointQueryRow[];
       
       // Process and extract endpoint information
       const endpoints: EndpointInfo[] = [];

@@ -32,6 +32,8 @@ export interface BabelNode {
   key?: BabelNode;
   abstract?: boolean;
   const?: boolean;
+  typeAnnotation?: { typeAnnotation?: BabelTypeAnnotation };
+  returnType?: { typeAnnotation?: BabelTypeAnnotation };
   [key: string]: unknown; // Allow additional properties
 }
 
@@ -65,7 +67,8 @@ export interface BabelClassMember {
   } | null;
 }
 
-export interface BabelTypeAnnotation extends BabelNode {
+export interface BabelTypeAnnotation {
+  type: string;
   typeAnnotation?: BabelNode;
 }
 

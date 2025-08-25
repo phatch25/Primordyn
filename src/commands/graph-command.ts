@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
+import type { GraphDependency } from '../types/database.js';
 
 interface SymbolWithPath extends Record<string, unknown> {
   id: number;
@@ -129,7 +130,7 @@ export const graphCommand =
             `;
             
             const stmt = db.getDatabase().prepare(query);
-            deps = stmt.all(symbolId) as any[];
+            deps = stmt.all(symbolId) as GraphDependency[];
           } else {
             // Fallback to name-based search
             const isReverse = reverse !== undefined ? reverse : options.reverse;
@@ -170,7 +171,7 @@ export const graphCommand =
             `;
             
             const stmt = db.getDatabase().prepare(query);
-            deps = stmt.all(name) as any[];
+            deps = stmt.all(name) as GraphDependency[];
           }
           
           const children: GraphNode[] = [];

@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
+import type { TargetSymbolResult, TextSearchResult, BreakingChangeResult } from '../types/database.js';
 
 interface ImpactNode {
   symbol_name: string;
@@ -45,7 +46,7 @@ export const impactCommand =
           WHERE s.name = ?
           LIMIT 1
         `);
-        const targetSymbol = targetStmt.get(symbolName) as any;
+        const targetSymbol = targetStmt.get(symbolName) as TargetSymbolResult | undefined;
         
         if (!targetSymbol) {
           spinner.fail(chalk.red(`Symbol "${symbolName}" not found`));
@@ -152,7 +153,7 @@ export const impactCommand =
           `);
           
           const searchPattern = `%${symbolName}%`;
-          const textResults = textSearchStmt.all(searchPattern, targetSymbol.id) as any[];
+          const textResults = textSearchStmt.all(searchPattern, targetSymbol.id) as TextSearchResult[];
           
           // Analyze text results for actual usage
           textResults.forEach(file => {
@@ -307,7 +308,8 @@ export const impactCommand =
           FROM call_graph
           WHERE callee_symbol_id = (SELECT id FROM symbols WHERE name = ? LIMIT 1)
         `);
-        const { callers } = breakingChangeStmt.get(symbolName) as any;
+        const breakingResult = breakingChangeStmt.get(symbolName) as BreakingChangeResult | undefined;
+        const callers = breakingResult?.callers ?? 0;
         
         console.log(chalk.cyan('\n⚡ BREAKING CHANGE DETECTION:'));
         console.log(`  • Method signature changes would affect ${chalk.white(callers)} direct callers`);

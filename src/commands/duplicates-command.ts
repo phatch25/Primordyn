@@ -4,19 +4,11 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { createHash } from 'crypto';
 import { getHelpText } from '../utils/help-texts.js';
+import type { DuplicateSymbolQueryResult } from '../types/database.js';
 
 interface DuplicateGroup {
   hash: string;
-  symbols: Array<{
-    name: string;
-    type: string;
-    file_path: string;
-    relative_path: string;
-    line_start: number;
-    line_end: number;
-    content: string;
-    line_count: number;
-  }>;
+  symbols: DuplicateSymbolQueryResult[];
 }
 
 export const duplicatesCommand =
@@ -60,7 +52,7 @@ export const duplicatesCommand =
             AND (s.line_end - s.line_start + 1) >= ?
         `;
         
-        const params: any[] = [options.minLines];
+        const params: (string | number)[] = [options.minLines];
         
         // Note: token_count field doesn't exist in new schema
         
@@ -76,10 +68,10 @@ export const duplicatesCommand =
         }
         
         const stmt = db.getDatabase().prepare(query);
-        const symbols = stmt.all(...params) as any[];
+        const symbols = stmt.all(...params) as DuplicateSymbolQueryResult[];
         
         // Create normalized hashes for comparison
-        const duplicateMap = new Map<string, any[]>();
+        const duplicateMap = new Map<string, DuplicateSymbolQueryResult[]>();
         
         for (const symbol of symbols) {
           // Normalize content: remove whitespace variations, comments

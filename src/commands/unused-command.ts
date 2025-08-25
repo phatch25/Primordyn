@@ -3,6 +3,7 @@ import { PrimordynDB } from '../database/index.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import { getHelpText } from '../utils/help-texts.js';
+import type { UnusedSymbolQueryResult } from '../types/database.js';
 
 function getSymbolIcon(type: string): string {
   const icons: Record<string, string> = {
@@ -59,7 +60,7 @@ export const unusedCommand =
           minLines: options.minLines,
           customIgnore: options.ignore,
           strict: options.strict
-        }) as any[]; // Cast as any[] since the query adds computed fields (line_count, is_exported)
+        }) as unknown as UnusedSymbolQueryResult[];
         
         spinner.stop();
         
@@ -70,7 +71,7 @@ export const unusedCommand =
         }
         
         // Group by file for better display
-        const byFile = new Map<string, any[]>();
+        const byFile = new Map<string, UnusedSymbolQueryResult[]>();
         for (const symbol of unusedSymbols) {
           if (!byFile.has(symbol.relative_path)) {
             byFile.set(symbol.relative_path, []);

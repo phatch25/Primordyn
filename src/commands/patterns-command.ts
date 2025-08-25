@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { PatternMatcher, ExtractedPatterns } from '../utils/pattern-matcher.js';
 import { getHelpText } from '../utils/help-texts.js';
+import type { PatternTargetSymbol, PatternCandidate } from '../types/database.js';
 
 interface SimilarSymbol {
   name: string;
@@ -48,7 +49,7 @@ export const patternsCommand =
           WHERE s.name = ?
           LIMIT 1
         `);
-        const targetSymbol = targetStmt.get(symbolName) as any;
+        const targetSymbol = targetStmt.get(symbolName) as PatternTargetSymbol | undefined;
         
         if (!targetSymbol) {
           spinner.fail(chalk.red(`Symbol "${symbolName}" not found`));
@@ -122,7 +123,7 @@ export const patternsCommand =
             WHERE (s.name = 'constructor' OR s.type = 'method')
               AND s.id != ?
           `);
-          candidates = candidatesStmt.all(targetSymbol.id) as any[];
+          candidates = candidatesStmt.all(targetSymbol.id) as PatternCandidate[];
         } else if (options.pattern) {
           // Broader search when pattern specified
           candidatesStmt = db.getDatabase().prepare(`
@@ -131,7 +132,7 @@ export const patternsCommand =
             JOIN files f ON s.file_id = f.id
             WHERE s.id != ?
           `);
-          candidates = candidatesStmt.all(targetSymbol.id) as any[];
+          candidates = candidatesStmt.all(targetSymbol.id) as PatternCandidate[];
         } else {
           // Default: same type only
           candidatesStmt = db.getDatabase().prepare(`
@@ -141,7 +142,7 @@ export const patternsCommand =
             WHERE s.type = ?
               AND s.id != ?
           `);
-          candidates = candidatesStmt.all(targetSymbol.type, targetSymbol.id) as any[];
+          candidates = candidatesStmt.all(targetSymbol.type, targetSymbol.id) as PatternCandidate[];
         }
         
         // Calculate similarity for each candidate

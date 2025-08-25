@@ -86,3 +86,99 @@ export interface CallGraphQueryResult {
   line_number: number;
   caller_file_path: string;
 }
+
+export interface EndpointQueryRow {
+  name: string;
+  type: string;
+  signature: string | null;
+  line_start: number;
+  metadata: string | null;
+  file_path: string;
+}
+
+export interface TargetSymbolResult {
+  id: number;
+  name: string;
+  type: string;
+  signature: string | null;
+  line_start: number;
+  line_end: number;
+  file_id: number;
+  relative_path: string;
+  file_path: string;
+}
+
+export interface TextSearchResult {
+  file_path: string;
+  relative_path: string;
+  content: string;
+}
+
+export interface BreakingChangeResult {
+  callers: number;
+}
+
+export interface DuplicateSymbolQueryResult {
+  name: string;
+  type: string;
+  file_path: string;
+  relative_path: string;
+  line_start: number;
+  line_end: number;
+  content: string;
+  line_count: number;
+}
+
+export interface UnusedSymbolQueryResult {
+  id: number;
+  file_id: number;
+  name: string;
+  type: string;
+  line_start: number;
+  line_end: number;
+  signature: string | null;
+  documentation: string | null;
+  metadata: string | null;
+  relative_path: string;
+  file_path: string;
+  language: string;
+  line_count: number;
+  is_exported: 0 | 1;
+}
+
+export interface PatternTargetSymbol {
+  id: number;
+  file_id: number;
+  name: string;
+  type: string;
+  line_start: number;
+  line_end: number;
+  signature: string | null;
+  documentation: string | null;
+  metadata: string | null;
+  relative_path: string;
+  file_path: string;
+  file_content: string;
+}
+
+export interface PatternCandidate {
+  id: number;
+  name: string;
+  type: string;
+  line_start: number;
+  line_end: number;
+  file_path: string;
+  relative_path: string;
+  file_content: string;
+}
+
+export interface GraphDependency {
+  name: string;
+  type: string;
+  id: number;
+  signature: string | null;
+  line_start: number;
+  file: string;
+  file_path: string;
+  call_count: number;
+}

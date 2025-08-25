@@ -3,6 +3,7 @@ import { encodingForModel, Tiktoken } from 'js-tiktoken';
 import { GitAnalyzer } from '../git/analyzer.js';
 import { LRUCache } from '../utils/lru-cache.js';
 import Fuse from 'fuse.js';
+import { FTSSearchStrategy, LikeSearchStrategy, FilePathSearchStrategy } from './search-strategy.js';
 import type { 
   QueryOptions, QueryResult, FileResult, SymbolResult, 
   DependencyGraph, CallGraphNode, CallGraphEdge, ImpactAnalysis, GitHistory, 
@@ -18,6 +19,9 @@ export class ContextRetriever {
   private queryCache: LRUCache<QueryResult>;
   private symbolCache: LRUCache<SymbolResult[]>;
   private fileCache: LRUCache<FileResult>;
+  private ftsStrategy: FTSSearchStrategy;
+  private likeStrategy: LikeSearchStrategy;
+  private filePathStrategy: FilePathSearchStrategy;
 
   constructor(db: PrimordynDB) {
     this.db = db;
@@ -29,6 +33,12 @@ export class ContextRetriever {
     this.queryCache = new LRUCache<QueryResult>(100, 30);
     this.symbolCache = new LRUCache<SymbolResult[]>(200, 30);
     this.fileCache = new LRUCache<FileResult>(100, 30);
+    
+    // Initialize search strategies
+    const database = db.getDatabase();
+    this.ftsStrategy = new FTSSearchStrategy(database);
+    this.likeStrategy = new LikeSearchStrategy(database);
+    this.filePathStrategy = new FilePathSearchStrategy(database);
   }
 
   public async query(searchTerm: string, options: QueryOptions = {}): Promise<QueryResult> {
@@ -42,7 +52,6 @@ export class ContextRetriever {
     }
     
     const maxTokens = options.maxTokens || 4000;
-    const database = this.db.getDatabase();
 
     const result: QueryResult = {
       files: [],
@@ -58,69 +67,22 @@ export class ContextRetriever {
     let symbols: SymbolQueryRow[] = [];
     
     if (isFilePathSearch) {
-      // Specialized file path search
-      files = await this.searchByFilePath(searchTerm, options);
+      // Use file path strategy
+      files = this.filePathStrategy.searchFiles(searchTerm, options);
+      symbols = this.filePathStrategy.searchSymbols(searchTerm, options);
     } else {
       // Check if we can use FTS5 or need to fall back to LIKE
       const escapedTerm = this.escapeFTS5(searchTerm);
       const useFTS = escapedTerm.length > 0 && escapedTerm !== '';
       
       if (useFTS) {
-        // Use FTS for better search
-        const fileQuery = this.buildFileQuery(escapedTerm, options);
-        files = database.prepare(fileQuery).all({ searchTerm: escapedTerm }) as FileQueryRow[];
-
-        // Search in symbols using FTS
-        const symbolQuery = this.buildSymbolQuery(escapedTerm, options);
-        symbols = database.prepare(symbolQuery).all({ searchTerm: escapedTerm }) as SymbolQueryRow[];
+        // Use FTS strategy
+        files = this.ftsStrategy.searchFiles(escapedTerm, options);
+        symbols = this.ftsStrategy.searchSymbols(escapedTerm, options);
       } else {
-        // Fall back to LIKE queries for special characters or OR queries
-        const fileQuery = this.buildFileLikeQuery(searchTerm, options);
-        
-        // Build params based on whether it's an OR query
-        const params: string[] = [];
-        if (searchTerm.includes(' OR ')) {
-          const terms = searchTerm.split(/\s+OR\s+/i);
-          terms.forEach(term => {
-            params.push(`%${term.trim()}%`, `%${term.trim()}%`);
-          });
-        } else {
-          params.push(`%${searchTerm}%`, `%${searchTerm}%`);
-        }
-        
-        if (options.fileTypes?.length) {
-          params.push(...options.fileTypes);
-        }
-        files = database.prepare(fileQuery).all(...params) as FileQueryRow[];
-        
-        const symbolQuery = this.buildSymbolLikeQuery(searchTerm, options);
-        const symbolParams: string[] = [];
-        
-        // Build symbol params based on whether it's an OR query
-        if (searchTerm.includes(' OR ')) {
-          const terms = searchTerm.split(/\s+OR\s+/i);
-          terms.forEach(term => {
-            symbolParams.push(`%${term.trim()}%`, `%${term.trim()}%`, `%${term.trim()}%`);
-          });
-        } else {
-          symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
-        }
-        
-        if (options.fileTypes?.length) {
-          symbolParams.push(...options.fileTypes);
-        }
-        
-        // Add parameters for ORDER BY (only for non-OR queries)
-        if (!searchTerm.includes(' OR ')) {
-          const hasMultipleWords = searchTerm.trim().split(/\s+/).length > 1;
-          if (hasMultipleWords) {
-            symbolParams.push(`%${searchTerm}%`, `%${searchTerm}%`);
-          } else {
-            symbolParams.push(searchTerm, `%${searchTerm}%`);
-          }
-        }
-        
-        symbols = database.prepare(symbolQuery).all(...symbolParams) as SymbolQueryRow[];
+        // Use LIKE strategy for special characters or OR queries
+        files = this.likeStrategy.searchFiles(searchTerm, options);
+        symbols = this.likeStrategy.searchSymbols(searchTerm, options);
       }
     }
     
@@ -613,68 +575,6 @@ export class ContextRetriever {
     return result;
   }
 
-  private buildFileQuery(_searchTerm: string, options: QueryOptions): string {
-    let query = `
-      SELECT 
-        f.id, 
-        f.path, 
-        f.relative_path as relativePath, 
-        f.content, 
-        f.language, 
-        f.metadata,
-        f.size,
-        f.last_modified as lastModified
-      FROM files_fts fts
-      JOIN files f ON fts.rowid = f.id
-      WHERE files_fts MATCH :searchTerm
-    `;
-
-    if (options.fileTypes?.length) {
-      query += ` AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})`;
-    }
-
-    switch (options.sortBy) {
-      case 'path':
-        query += ' ORDER BY f.relative_path';
-        break;
-      case 'size':
-        query += ' ORDER BY f.size DESC';
-        break;
-      case 'modified':
-        query += ' ORDER BY f.last_modified DESC';
-        break;
-      default:
-        query += ' ORDER BY bm25(files_fts)';
-    }
-
-    query += ' LIMIT 10';
-    return query;
-  }
-
-  private buildSymbolQuery(_searchTerm: string, options: QueryOptions): string {
-    let query = `
-      SELECT 
-        s.id,
-        s.name,
-        s.type,
-        s.line_start as lineStart,
-        s.line_end as lineEnd,
-        s.signature,
-        f.relative_path as filePath,
-        f.content as fileContent
-      FROM symbols_fts fts
-      JOIN symbols s ON fts.rowid = s.id
-      JOIN files f ON s.file_id = f.id
-      WHERE symbols_fts MATCH :searchTerm
-    `;
-
-    if (options.fileTypes?.length) {
-      query += ` AND f.language IN (${options.fileTypes.map(t => `'${t}'`).join(',')})`;
-    }
-
-    query += ' ORDER BY bm25(symbols_fts) LIMIT 15';
-    return query;
-  }
 
   private async processFileResult(file: FileQueryRow, options: QueryOptions): Promise<FileResult> {
     const metadata = file.metadata ? JSON.parse(file.metadata) : {};
@@ -1782,96 +1682,6 @@ export class ContextRetriever {
     return candidates.slice(0, 10);
   }
   
-  private buildFileLikeQuery(searchTerm: string, options: QueryOptions): string {
-    // Check if this is an OR query (expanded alias)
-    const isOrQuery = searchTerm.includes(' OR ');
-    let whereClause: string;
-    
-    if (isOrQuery) {
-      // Split OR terms and build conditions for each
-      const terms = searchTerm.split(/\s+OR\s+/i);
-      const conditions = terms.map(() => '(f.content LIKE ? OR f.relative_path LIKE ?)').join(' OR ');
-      whereClause = `WHERE (${conditions})`;
-    } else {
-      whereClause = 'WHERE (f.content LIKE ? OR f.relative_path LIKE ?)';
-    }
-    
-    let query = `
-      SELECT 
-        f.id, f.path, f.relative_path, f.content, 
-        f.language, f.metadata, f.size, f.last_modified
-      FROM files f
-      ${whereClause}
-    `;
-    
-    if (options.fileTypes && options.fileTypes.length > 0) {
-      query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
-    }
-    
-    query += ' ORDER BY f.relative_path LIMIT 100';
-    return query;
-  }
-  
-  private buildSymbolLikeQuery(searchTerm: string, options: QueryOptions): string {
-    // Check if this is an OR query (expanded alias)
-    const isOrQuery = searchTerm.includes(' OR ');
-    let whereClause: string;
-    
-    if (isOrQuery) {
-      // Split OR terms and build conditions for each
-      const terms = searchTerm.split(/\s+OR\s+/i);
-      const conditions = terms.map(() => '(s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)').join(' OR ');
-      whereClause = `WHERE (${conditions})`;
-    } else {
-      whereClause = 'WHERE (s.name LIKE ? OR s.signature LIKE ? OR s.metadata LIKE ?)';
-    }
-    
-    // For multi-word searches like "async def get_current_user", prioritize signature matches
-    const hasMultipleWords = !isOrQuery && searchTerm.trim().split(/\s+/).length > 1;
-    
-    let query = `
-      SELECT 
-        s.*, f.relative_path as filePath, f.language, f.content as fileContent
-      FROM symbols s
-      JOIN files f ON s.file_id = f.id
-      ${whereClause}
-    `;
-    
-    if (options.symbolType) {
-      query += ` AND s.type = '${options.symbolType}'`;
-    }
-    
-    if (options.fileTypes && options.fileTypes.length > 0) {
-      query += ` AND f.language IN (${options.fileTypes.map(() => '?').join(',')})`;
-    }
-    
-    // Better ordering: prioritize exact matches and signature matches for multi-word queries
-    if (isOrQuery) {
-      // For OR queries, just order by name length
-      query += ` ORDER BY LENGTH(s.name) LIMIT 100`;
-    } else if (hasMultipleWords) {
-      query += ` ORDER BY 
-        CASE 
-          WHEN s.signature LIKE ? THEN 0
-          WHEN s.name LIKE ? THEN 1
-          ELSE 2
-        END,
-        LENGTH(s.name)
-      LIMIT 100`;
-    } else {
-      query += ` ORDER BY 
-        CASE 
-          WHEN LOWER(s.name) = LOWER(?) THEN 0
-          WHEN s.name LIKE ? THEN 1
-          ELSE 2
-        END,
-        LENGTH(s.name)
-      LIMIT 100`;
-    }
-    
-    return query;
-  }
-  
   private looksLikeFilePath(searchTerm: string): boolean {
     // Check if the search term looks like a file path
     return searchTerm.includes('/') || 
@@ -1885,59 +1695,6 @@ export class ContextRetriever {
             searchTerm.endsWith('.h') || searchTerm.endsWith('.hpp') ||
             searchTerm.endsWith('.cs') || searchTerm.endsWith('.rb') ||
             searchTerm.endsWith('.php') || searchTerm.endsWith('.swift'));
-  }
-  
-  private async searchByFilePath(searchTerm: string, options: QueryOptions): Promise<FileQueryRow[]> {
-    const database = this.db.getDatabase();
-    
-    // Normalize the search term (remove leading ./ or trailing extensions sometimes)
-    const normalizedPath = searchTerm.replace(/^\.[\/\\]/, '').replace(/\\/, '/');
-    
-    // Try exact match first
-    let query = `
-      SELECT 
-        f.id, f.path, f.relative_path, f.content, 
-        f.language, f.metadata, f.size, f.last_modified
-      FROM files f
-      WHERE f.relative_path = ? OR f.path = ?
-    `;
-    
-    let files = database.prepare(query).all(normalizedPath, normalizedPath) as FileQueryRow[];
-    
-    // If no exact match, try partial matches
-    if (files.length === 0) {
-      query = `
-        SELECT 
-          f.id, f.path, f.relative_path, f.content, 
-          f.language, f.metadata, f.size, f.last_modified
-        FROM files f
-        WHERE f.relative_path LIKE ? OR f.path LIKE ?
-        ORDER BY 
-          CASE 
-            WHEN f.relative_path LIKE ? THEN 0
-            WHEN f.relative_path LIKE ? THEN 1
-            ELSE 2
-          END,
-          LENGTH(f.relative_path)
-        LIMIT 20
-      `;
-      
-      const searchPattern = `%${normalizedPath}%`;
-      const endsWithPattern = `%${normalizedPath}`;
-      const startsWithPattern = `${normalizedPath}%`;
-      
-      files = database.prepare(query).all(
-        searchPattern, searchPattern,
-        endsWithPattern, startsWithPattern
-      ) as FileQueryRow[];
-    }
-    
-    // Apply file type filters if specified
-    if (options.fileTypes && options.fileTypes.length > 0) {
-      files = files.filter(f => f.language && options.fileTypes!.includes(f.language));
-    }
-    
-    return files;
   }
   
   private async fuzzySearchFiles(searchTerm: string, options: QueryOptions = {}): Promise<FileQueryRow[]> {

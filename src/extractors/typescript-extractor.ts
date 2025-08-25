@@ -109,8 +109,7 @@ export class TypeScriptExtractor extends BaseExtractor {
           this.extractEnum(path.node as unknown as BabelTSNode, context.symbols);
         },
         ImportDeclaration: (path: NodePath) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const node = path.node as any;
+          const node = path.node as BabelNode;
           const source = node.source?.value;
           if (source) {
             context.imports.push(source);
@@ -118,8 +117,7 @@ export class TypeScriptExtractor extends BaseExtractor {
           }
         },
         ExportNamedDeclaration: (path: NodePath) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const node = path.node as any;
+          const node = path.node as BabelNode;
           if (node.declaration) {
             const decl = node.declaration;
             if ('id' in decl && decl.id && 'name' in decl.id) {
@@ -203,7 +201,7 @@ export class TypeScriptExtractor extends BaseExtractor {
         return p.name;
       }
       if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') {
-        const typeAnnotation = (p.argument as any).typeAnnotation;
+        const typeAnnotation = (p.argument as BabelNode).typeAnnotation;
         if (typeAnnotation?.typeAnnotation) {
           const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
           return `...${p.argument.name}: ${typeStr}`;
@@ -214,7 +212,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     }).join(', ');
     
     // Include return type if available
-    const returnType = (node as any).returnType?.typeAnnotation;
+    const returnType = (node as BabelNode).returnType?.typeAnnotation;
     const returnTypeStr = returnType ? `: ${this.getTypeString(returnType)}` : '';
     
     const signature = `${node.async ? 'async ' : ''}function ${functionName}(${params})${returnTypeStr}`;
@@ -240,7 +238,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     
     const params = (node.params || []).map((p: BabelNode) => {
       if (p.type === 'Identifier') {
-        const typeAnnotation = (p as any).typeAnnotation;
+        const typeAnnotation = (p as BabelNode).typeAnnotation;
         if (typeAnnotation?.typeAnnotation) {
           const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
           return `${p.name}: ${typeStr}`;
@@ -248,7 +246,7 @@ export class TypeScriptExtractor extends BaseExtractor {
         return p.name;
       }
       if (p.type === 'RestElement' && p.argument && p.argument.type === 'Identifier') {
-        const typeAnnotation = (p.argument as any).typeAnnotation;
+        const typeAnnotation = (p.argument as BabelNode).typeAnnotation;
         if (typeAnnotation?.typeAnnotation) {
           const typeStr = this.getTypeString(typeAnnotation.typeAnnotation);
           return `...${p.argument.name}: ${typeStr}`;
@@ -259,7 +257,7 @@ export class TypeScriptExtractor extends BaseExtractor {
     }).join(', ');
     
     // Include return type if available
-    const returnType = (node as any).returnType?.typeAnnotation;
+    const returnType = (node as BabelNode).returnType?.typeAnnotation;
     const returnTypeStr = returnType ? `: ${this.getTypeString(returnType)}` : '';
     
     const signature = `const ${name} = ${node.async ? 'async ' : ''}(${params})${returnTypeStr} => ...`;
@@ -423,7 +421,7 @@ export class TypeScriptExtractor extends BaseExtractor {
       metadata: {
         members,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const: (node as any).const || false
+        const: (node as BabelNode).const || false
       }
     });
   }
