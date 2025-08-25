@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import type { DatabaseInfo } from '../types/index.js';
+import type { CountResult, SumResult, MaxResult } from '../types/database.js';
 import { SymbolRepository, FileRepository } from './repositories/index.js';
 
 export class PrimordynDB {
@@ -165,11 +166,11 @@ export class PrimordynDB {
   }
 
   public async getDatabaseInfo(): Promise<DatabaseInfo> {
-    const fileCount = (this.db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number }).count;
-    const symbolCount = (this.db.prepare('SELECT COUNT(*) as count FROM symbols').get() as { count: number }).count;
-    const totalSize = (this.db.prepare('SELECT SUM(size) as total FROM files').get() as { total: number }).total || 0;
+    const fileCount = (this.db.prepare('SELECT COUNT(*) as count FROM files').get() as CountResult).count;
+    const symbolCount = (this.db.prepare('SELECT COUNT(*) as count FROM symbols').get() as CountResult).count;
+    const totalSize = (this.db.prepare('SELECT SUM(size) as total FROM files').get() as SumResult).total || 0;
     
-    const lastIndexedRow = this.db.prepare('SELECT MAX(indexed_at) as last FROM files').get() as { last: string | null };
+    const lastIndexedRow = this.db.prepare('SELECT MAX(indexed_at) as last FROM files').get() as MaxResult;
     const lastIndexed = lastIndexedRow?.last ? new Date(lastIndexedRow.last) : null;
 
     return {
